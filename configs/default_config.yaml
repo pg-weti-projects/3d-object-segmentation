@@ -1,0 +1,35 @@
+# ==============================================================================
+# TEMPLATE / EXAMPLE CONFIGURATION ( #TODO Task 0.2)
+# ==============================================================================
+
+experiment:
+  id: "exp_baseline_default"
+  description: "Default configuration template for a single segmentation experiment"
+  seed: 42
+  repetitions: 3                  # NFNC_04 - requirement (3-run repetition)
+
+data:
+  input_path: "data/raw/fish_01.dcm"
+  reference_mask_path: "data/reference_masks/fish_01_gt.nii.gz"
+  format: "dicom"                 # formats: 'dicom', 'tiff', 'voxels-json'
+
+preprocessing:
+  target_spacing: [1.0, 1.0, 1.0] # Spatial resampling to isotropic 1x1x1 mm voxels
+  hu_range: [-1000, 200]          # Hounsfield Units intensity scaling (min, max)
+  invert_hu: false                # Optional HU inversion for air-filled structures
+  denoise: true                   # Adaptive denoising
+
+algorithm:
+  name: "chan_vese"               # 'chan_vese', 'unet_2d', 'medsam', 'sam_med3d'
+  parameters:
+    threshold_hu: -500
+    max_iterations: 100
+
+mesh:
+  algorithm: "marching_cubes"     # 3D mesh reconstruction algorithm
+  smoothing_iterations: 15
+  decimation_factor: 0.2          # Triangle reduction factor (0.0 - none, 0.5 - 50% reduction)
+  output_format: "glb"            # formats: 'glb', 'stl', 'obj', 'ply'
+
+output:
+  results_dir: "results/"

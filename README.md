@@ -4,6 +4,44 @@ A research framework for **3D swim bladder segmentation from CT scans**, geometr
 
 ---
 
+## Flask Application
+
+Create and activate a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+On Windows:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+Install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+On the first run, create the local configuration file:
+
+```bash
+cp src/api/config.toml.example src/api/config.toml
+```
+
+The local `src/api/config.toml` contains application runtime settings and is
+ignored by Git. Adjust it if needed, then start Flask:
+
+```bash
+python -m src.api.app
+```
+
+Open `http://127.0.0.1:5000` to verify that the standalone web application is
+running.
+
 ## 📁 Project Structure
 
 > **Note:** This is the planned target structure. Some components are not implemented yet.

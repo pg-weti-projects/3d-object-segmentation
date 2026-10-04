@@ -42,6 +42,34 @@ python -m src.api.app
 Open `http://127.0.0.1:5000` to verify that the standalone web application is
 running.
 
+### Application endpoints
+
+The Flask application is organized around separate routes, so further pages
+and endpoints can be added without changing the application entry point.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/` | Application entry point |
+| `GET` | `/health` | Health check |
+| `GET` | `/preprocess` | Display the volume preprocessing form |
+| `POST` | `/process` | Load and preprocess uploaded JSON, TIFF, or DICOM data |
+
+After `POST /process`, the **Processed volume** page displays the unified
+`Volume` metadata: source format, input/output shape, spacing, units, output
+value range, source SHA-256 hash, and the middle axial slice after
+preprocessing.
+
+Future route groups can be added for `/segmentation`, `/mesh`, `/metrics`, and
+`/export`.
+
+### Running tests
+
+With the virtual environment activated, run:
+
+```bash
+python -m pytest -q
+```
+
 ## 📁 Project Structure
 
 > **Note:** This is the planned target structure. Some components are not implemented yet.

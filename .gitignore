@@ -18,3 +18,7 @@ pytest_cache/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# Data files
+*.nii
+*.dcm

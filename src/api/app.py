@@ -9,7 +9,7 @@ from flask import Flask, render_template
 def create_app() -> Flask:
     """Create web app with config file."""
     app = Flask(__name__)
-    config_path = Path(__file__).with_name("config.toml.example")
+    config_path = Path(__file__).with_name("config.toml")
     settings = {}
     if config_path.exists():
         with config_path.open("rb") as config_file:

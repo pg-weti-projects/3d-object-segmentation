@@ -1,0 +1,7 @@
+numpy>=2.0
+pydicom>=3.0
+scipy>=1.14
+tifffile>=2024.7
+PyYAML>=6.0
+Flask>=3.0
+pytest>=8.0

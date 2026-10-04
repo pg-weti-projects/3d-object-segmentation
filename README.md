@@ -4,6 +4,72 @@ A research framework for **3D swim bladder segmentation from CT scans**, geometr
 
 ---
 
+## Flask Application
+
+Create and activate a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+On Windows:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+Install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+On the first run, create the local configuration file:
+
+```bash
+cp src/api/config.toml.example src/api/config.toml
+```
+
+The local `src/api/config.toml` contains application runtime settings and is
+ignored by Git. Adjust it if needed, then start Flask:
+
+```bash
+python -m src.api.app
+```
+
+Open `http://127.0.0.1:5000` to verify that the standalone web application is
+running.
+
+### Application endpoints
+
+The Flask application is organized around separate routes, so further pages
+and endpoints can be added without changing the application entry point.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/` | Application entry point |
+| `GET` | `/health` | Health check |
+| `GET` | `/preprocess` | Display the volume preprocessing form |
+| `POST` | `/process` | Load and preprocess uploaded JSON, TIFF, or DICOM data |
+
+After `POST /process`, the **Processed volume** page displays the unified
+`Volume` metadata: source format, input/output shape, spacing, units, output
+value range, source SHA-256 hash, and the middle axial slice after
+preprocessing.
+
+Future route groups can be added for `/segmentation`, `/mesh`, `/metrics`, and
+`/export`.
+
+### Running tests
+
+With the virtual environment activated, run:
+
+```bash
+python -m pytest -q
+```
+
 ## 📁 Project Structure
 
 > **Note:** This is the planned target structure. Some components are not implemented yet.

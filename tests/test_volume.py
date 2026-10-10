@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 
-from src.core.loaders import load_volume
+from src.core.loaders import load_tiff_series, load_volume
 from src.core.preprocessor import PreprocessingConfig, preprocess
 
 
@@ -81,6 +81,21 @@ def test_oreo_json_schema_is_loaded(tmp_path):
     assert volume.spacing_mm == (3.0, 3.0, 3.0)
     assert volume.units == "kg/m^3"
     np.testing.assert_array_equal(volume.data, [[[1, 2], [3, 4]]])
+
+
+def test_tiff_series_is_loaded(tmp_path):
+    import tifffile
+
+    paths = []
+    for index, values in enumerate((1, 2, 3)):
+        path = tmp_path / f"slice_{index:04d}.tif"
+        tifffile.imwrite(path, np.full((2, 3), values, dtype=np.uint16))
+        paths.append(path)
+
+    volume = load_tiff_series(paths)
+
+    assert volume.shape == (3, 2, 3)
+    np.testing.assert_array_equal(volume.data[:, 0, 0], [1, 2, 3])
 
 
 def test_unknown_suffix_is_rejected(tmp_path):

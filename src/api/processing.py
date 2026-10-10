@@ -5,7 +5,12 @@ import numpy as np
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
-from src.core import PreprocessingConfig, load_volume, preprocess
+from src.core import (
+    PreprocessingConfig,
+    load_tiff_series,
+    load_volume,
+    preprocess,
+)
 
 
 ALLOWED_EXTENSIONS = {".dcm", ".json", ".tif", ".tiff"}
@@ -78,4 +83,11 @@ def _load_uploaded_volume(uploads: list[FileStorage], suffixes: set[str], direct
             path = directory / f"{index:04d}_{secure_filename(uploaded.filename)}"
             uploaded.save(path)
         return load_volume(directory)
-    raise ValueError("Select one file or multiple DICOM slices.")
+    if suffixes.issubset({".tif", ".tiff"}):
+        paths = []
+        for index, uploaded in enumerate(uploads):
+            path = directory / f"{index:04d}_{secure_filename(uploaded.filename)}"
+            uploaded.save(path)
+            paths.append(path)
+        return load_tiff_series(paths)
+    raise ValueError("Select one file or a folder containing TIFF or DICOM slices.")

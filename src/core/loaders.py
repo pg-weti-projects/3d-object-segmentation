@@ -95,6 +95,22 @@ def load_tiff(path: str | Path) -> Volume:
     return Volume(data, (1.0, 1.0, 1.0), "HU", "tiff", hash_bytes(source.read_bytes()))
 
 
+def load_tiff_series(paths: list[str | Path]) -> Volume:
+    """Load multiple TIFF slices into one ``(Z, Y, X)`` volume."""
+    files = sorted((Path(path) for path in paths), key=_natural_path_key)
+    if not files:
+        raise VolumeLoadError("TIFF series contains no files")
+    try:
+        arrays = [_as_volume_array(tifffile.imread(path)) for path in files]
+        if any(array.shape[0] != 1 for array in arrays):
+            raise ValueError("TIFF series files must contain 2D slices")
+        data = np.concatenate(arrays, axis=0)
+        digest = hash_bytes(b"".join(path.read_bytes() for path in files))
+    except (OSError, ValueError) as exc:
+        raise VolumeLoadError("Invalid TIFF series") from exc
+    return Volume(data, (1.0, 1.0, 1.0), "HU", "tiff", digest)
+
+
 def load_dicom(path: str | Path) -> Volume:
     source = Path(path)
     try:
@@ -187,3 +203,9 @@ def _format_from_suffix(path: Path) -> str:
     if suffix == ".dcm":
         return "dicom"
     raise UnsupportedFormatError(f"Unsupported input suffix: {suffix or '<none>'}")
+
+
+def _natural_path_key(path: Path) -> tuple[int, str]:
+    stem = path.stem
+    digits = "".join(character for character in stem if character.isdigit())
+    return (int(digits) if digits else -1, path.name)

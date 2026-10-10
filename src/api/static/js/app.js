@@ -1,0 +1,1 @@
+// Shared client-side behavior.

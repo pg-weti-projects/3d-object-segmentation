@@ -26,14 +26,8 @@ Install dependencies:
 python -m pip install -r requirements.txt
 ```
 
-On the first run, create the local configuration file:
-
-```bash
-cp src/api/config.toml.example src/api/config.toml
-```
-
-The local `src/api/config.toml` contains application runtime settings and is
-ignored by Git. Adjust it if needed, then start Flask:
+The `src/api/config.toml` file contains application runtime settings. Adjust it
+if needed, then start Flask:
 
 ```bash
 python -m src.api.app
@@ -47,35 +41,23 @@ running.
 > **Note:** This is the planned target structure. Some components are not implemented yet.
 
 ```text
-├── configs/
-│   ├── default_config.yaml           # base configuration
-│   └── experiments/                  # experiment-specific YAML configs e.g., exp_002_unet.yaml
-├── data/
-│   ├── raw/                          # input CT scans (.dcm, .tif/.tiff, .json)
-│   └── reference_masks/              # ground truth masks from 3D Slicer (.nii.gz)
-├── results/                          # generated experiment outputs
-├── src/
-│   ├── __init__.py
-│   ├── api/                          # Flask REST API
-│   │   ├── __init__.py
-│   │   └── app.py                    # API endpoints
-│   ├── core/                         # data loading & preprocessing
-│   │   ├── volume.py                 # unified Volume (dataclass) representation
-│   │   ├── loaders.py                # DICOM, TIFF & JSON loaders
-│   │   └── preprocessor.py           # normalization, resampling & denoising
-│   ├── models/                       # Segmentation models 
-│   │   ├── analytical.py             
-│   │   ├── unet.py                   
-│   │   └── foundation/               
-│   └── pipeline/                     # reconstruction, metrics & experiments
-│       ├── mesh.py                   # Marching Cubes + smoothing + decimation
-│       ├── metrics.py                # Dice, IoU, HD95, ASSD & VS
-│       └── runner.py                 # deterministic experiment runner
-├── tests/                            # unit & integration tests
-├── web/                              # frontend & WebGL 3D viewer
-├── .gitignore
-├── requirements.txt
-├── LICENSE
-└── README.md
-```
----
+src/
+├── api/
+│   ├── app.py                  # Flask app factory and entry point
+│   ├── config.py               # TOML configuration loading
+│   ├── config.toml             # application runtime settings
+│   ├── routes/
+│   │   └── web.py              # HTML routes
+│   ├── services/               # application services
+│   ├── templates/
+│   │   ├── base.html           # shared page layout
+│   │   └── index.html          # application entry page
+│   └── static/
+│       ├── css/app.css         # application styles
+│       └── js/
+│           ├── app.js           # shared frontend behavior
+│           └── webgl-viewer.js  # WebGL viewer
+├── core/                       # framework-independent volume processing
+├── models/
+│   └── foundation/             # foundation model implementations
+└── pipeline/                   # segmentation, mesh, and metrics

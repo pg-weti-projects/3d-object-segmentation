@@ -53,6 +53,36 @@ def test_preprocessing_clips_inverts_denoises_and_resamples(tmp_path):
     assert result.data.max() <= 5
 
 
+def test_oreo_json_schema_is_loaded(tmp_path):
+    path = tmp_path / "oreo.json"
+    path.write_text(
+        json.dumps(
+            {
+                "specimens": [
+                    {
+                        "shapes": [
+                            {
+                                "voxel_size": [0.003, 0.003, 0.003],
+                                "voxel_size_units": "m",
+                                "mass_density": [[[1, 2], [3, 4]]],
+                                "mass_density_units": "kg/m^3",
+                            }
+                        ]
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    volume = load_volume(path)
+
+    assert volume.shape == (1, 2, 2)
+    assert volume.spacing_mm == (3.0, 3.0, 3.0)
+    assert volume.units == "kg/m^3"
+    np.testing.assert_array_equal(volume.data, [[[1, 2], [3, 4]]])
+
+
 def test_unknown_suffix_is_rejected(tmp_path):
     path = tmp_path / "scan.bmp"
     path.write_bytes(b"not a volume")

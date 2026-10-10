@@ -33,8 +33,8 @@ def process_uploads(uploads: list[FileStorage], form) -> dict:
         "source_hash": processed.source_hash,
         "minimum": float(processed.data.min()),
         "maximum": float(processed.data.max()),
-        "slice_index": processed.shape[0] // 2,
-        "slice_data": slice_for_preview(processed.data),
+        "slice_count": processed.shape[0],
+        "slices": slices_for_preview(processed.data),
     }
 
 
@@ -52,9 +52,13 @@ def preprocessing_config(form) -> PreprocessingConfig:
     )
 
 
-def slice_for_preview(data: np.ndarray) -> list[list[float]]:
-    """Normalize the middle axial slice for browser rendering."""
-    image = np.asarray(data[data.shape[0] // 2], dtype=np.float32)
+def slices_for_preview(data: np.ndarray) -> list[list[list[float]]]:
+    """Normalize every axial slice for browser rendering."""
+    return [slice_for_preview(data, index) for index in range(data.shape[0])]
+
+
+def slice_for_preview(data: np.ndarray, index: int) -> list[list[float]]:
+    image = np.asarray(data[index], dtype=np.float32)
     low, high = float(image.min()), float(image.max())
     if high > low:
         image = (image - low) / (high - low)

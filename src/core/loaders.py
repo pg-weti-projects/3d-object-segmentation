@@ -46,18 +46,44 @@ def load_json(path: str | Path) -> Volume:
     source = Path(path)
     try:
         payload = json.loads(source.read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            values = payload.get("data", payload.get("voxels"))
-            if values is None:
-                raise ValueError("JSON object must contain 'data' or 'voxels'")
-            spacing = _spacing(payload.get("spacing_mm", payload.get("spacing")))
-            units = str(payload.get("units", "HU"))
-        else:
-            values, spacing, units = payload, (1.0, 1.0, 1.0), "HU"
+        values, spacing, units = _json_volume_fields(payload)
         data = _as_volume_array(values)
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
         raise VolumeLoadError(f"Invalid voxel JSON: {source}") from exc
     return Volume(data, spacing, units, "voxels-json", hash_bytes(source.read_bytes()))
+
+
+def _json_volume_fields(payload: Any) -> tuple[Any, tuple[float, float, float], str]:
+    if not isinstance(payload, dict):
+        return payload, (1.0, 1.0, 1.0), "HU"
+
+    values = payload.get("data", payload.get("voxels"))
+    spacing = payload.get("spacing_mm", payload.get("spacing"))
+    units = payload.get("units", "HU")
+    if values is not None:
+        return values, _spacing(spacing), str(units)
+
+    specimens = payload.get("specimens")
+    if not isinstance(specimens, list) or len(specimens) != 1:
+        raise ValueError("JSON object must contain 'data', 'voxels', or one specimen")
+    shapes = specimens[0].get("shapes")
+    if not isinstance(shapes, list) or len(shapes) != 1:
+        raise ValueError("JSON specimen must contain exactly one shape")
+    shape = shapes[0]
+    values = shape.get("mass_density", shape.get("sound_speed_compressional"))
+    if values is None:
+        raise ValueError("JSON shape must contain voxel data")
+    spacing = _spacing_from_units(
+        shape.get("voxel_size"),
+        shape.get("voxel_size_units", "mm"),
+    )
+    units = str(
+        shape.get(
+            "mass_density_units",
+            shape.get("sound_speed_compressional_units", "HU"),
+        )
+    )
+    return values, spacing, units
 
 
 def load_tiff(path: str | Path) -> Volume:
@@ -140,6 +166,16 @@ def _spacing(value: Any) -> tuple[float, float, float]:
     if len(result) != 3:
         raise ValueError("spacing must contain exactly three values")
     return result
+
+
+def _spacing_from_units(value: Any, units: str) -> tuple[float, float, float]:
+    spacing = _spacing(value)
+    normalized_units = units.strip().lower()
+    if normalized_units in {"m", "meter", "meters"}:
+        return tuple(item * 1000 for item in spacing)
+    if normalized_units in {"mm", "millimeter", "millimeters"}:
+        return spacing
+    raise ValueError(f"Unsupported voxel size units: {units}")
 
 
 def _format_from_suffix(path: Path) -> str:

@@ -42,9 +42,16 @@
       <div class="col-lg-7">
         <section class="card border-0 shadow-sm">
           <div class="card-body">
-            <h2 class="h4">Middle axial slice <span class="text-secondary">(Z={{ result.slice_index }})</span></h2>
+            <h2 class="h4">Axial slice <span id="slice-label" class="text-secondary"></span></h2>
             <div class="bg-dark rounded p-2 mt-3 text-center">
               <canvas id="preview" class="img-fluid"></canvas>
+            </div>
+            <label class="form-label mt-4" for="slice-slider">Slice</label>
+            <input class="form-range" type="range" id="slice-slider"
+                   min="0" max="{{ result.slice_count - 1 }}" value="{{ result.slice_count // 2 }}">
+            <div class="d-flex justify-content-between small text-secondary">
+              <span>Z=0</span>
+              <span>Z={{ result.slice_count - 1 }}</span>
             </div>
           </div>
         </section>
@@ -53,7 +60,7 @@
     <a class="btn btn-outline-primary mt-4" href="{{ url_for('web.preprocess_page') }}">Process another volume</a>
   </main>
   <script>
-    window.volumePreviewData = {{ result.slice_data | tojson }};
+    window.volumePreviewData = {{ result.slices | tojson }};
   </script>
   <script src="{{ url_for('static', filename='js/volume-preview.js') }}"></script>
 </body>

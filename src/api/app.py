@@ -1,13 +1,11 @@
-"""Flask application entry point."""
-
 from flask import Flask
 
 from .config import load_settings
-from .routes import web
+from .routes.web import web
 
 
 def create_app() -> Flask:
-    """Create the web application."""
+    """Create the Flask application."""
     app = Flask(__name__)
     settings = load_settings()
     app.config.update(
@@ -17,6 +15,7 @@ def create_app() -> Flask:
     )
     app.register_blueprint(web)
     return app
+
 
 app = create_app()
 

@@ -18,6 +18,9 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Other data
+# Data files
 *.nii
 *.dcm
+*.tif
+*.tiff
+data/**/*.json

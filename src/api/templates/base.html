@@ -11,6 +11,11 @@
   <nav class="navbar navbar-dark bg-primary">
     <div class="container">
       <a class="navbar-brand" href="{{ url_for('web.index') }}">3D Segmentation</a>
+      <div class="navbar-nav">
+        <a class="nav-link" href="{{ url_for('web.preprocess_page') }}">
+          Preprocess volume
+        </a>
+      </div>
     </div>
   </nav>
   {% block content %}{% endblock %}

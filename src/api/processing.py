@@ -38,7 +38,6 @@ def process_uploads(uploads: list[FileStorage], form) -> dict:
         "source_hash": processed.source_hash,
         "minimum": float(processed.data.min()),
         "maximum": float(processed.data.max()),
-        "slice_count": processed.shape[0],
         "slices": slices_for_preview(processed.data),
     }
 
@@ -58,18 +57,14 @@ def preprocessing_config(form) -> PreprocessingConfig:
 
 
 def slices_for_preview(data: np.ndarray) -> list[list[list[float]]]:
-    """Normalize every axial slice for browser rendering."""
-    return [slice_for_preview(data, index) for index in range(data.shape[0])]
-
-
-def slice_for_preview(data: np.ndarray, index: int) -> list[list[float]]:
-    image = np.asarray(data[index], dtype=np.float32)
-    low, high = float(image.min()), float(image.max())
+    """Normalize the whole volume to [0, 1] with one global range for browser rendering."""
+    volume = np.asarray(data, dtype=np.float32)
+    low, high = float(volume.min()), float(volume.max())
     if high > low:
-        image = (image - low) / (high - low)
+        volume = (volume - low) / (high - low)
     else:
-        image = np.zeros_like(image)
-    return image.round(4).tolist()
+        volume = np.zeros_like(volume)
+    return volume.round(4).tolist()
 
 
 def _load_uploaded_volume(uploads: list[FileStorage], suffixes: set[str], directory: Path) -> np.ndarray:

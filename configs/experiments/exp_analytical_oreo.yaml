@@ -1,0 +1,31 @@
+experiment:
+  id: "exp_chan_vese_oreo"
+  description: "Analytical (Chan-Vese) baseline on Oreo_fish"
+  seed: 42
+  repetitions: 3
+
+data:
+  input_path: "data/raw/Oreo_fish/density"
+  reference_mask_path: "data/reference_masks/Oreo_fish/Segmentation.nii.gz"
+  format: "dicom"
+
+preprocessing:
+  target_spacing: [1.0, 1.0, 1.0]
+  hu_range: [-1000, 200]
+  invert_hu: false
+  denoise: true
+
+algorithm:
+  name: "chan_vese"
+  parameters:
+    threshold_hu: -500
+    max_iterations: 100
+
+mesh:
+  algorithm: "marching_cubes"
+  smoothing_iterations: 15
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

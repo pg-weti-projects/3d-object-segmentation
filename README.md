@@ -64,6 +64,18 @@ With the virtual environment activated, run:
 python -m pytest -q
 ```
 
+## Mesh reconstruction
+
+`src/pipeline/mesh.py` turns a 3D binary mask into a triangle mesh
+(Marching Cubes, Taubin smoothing, quadric decimation) and exports it as
+`.glb`, `.stl`, `.obj` or `.ply`.
+
+Meshes built from the three reference masks in `data/reference_masks/`
+(Bluefin Tuna, Gadus Morhua, Oreo fish):
+
+<img src="docs/images/reference_meshes.png" alt="Swim bladder meshes reconstructed from the reference masks" width="560">
+
+
 ## 📁 Project Structure
 
 > **Note:** This is the planned target structure. Some components are not implemented yet.

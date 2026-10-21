@@ -43,10 +43,11 @@ and endpoints can be added without changing the application entry point.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `GET` | `/` | Application entry point |
-| `GET` | `/health` | Health check |
 | `GET` | `/preprocess` | Display the volume preprocessing form |
+| `GET` | `/viewer` | 3D mesh viewer (`?id=<result>` opens `results/<result>/mesh.*`) |
+| `GET` | `/meshes/<id>/mesh.<fmt>` | Mesh as `glb`, `stl`, `obj` or `ply` (`?download=1` saves the file) |
 | `POST` | `/process` | Load and preprocess uploaded JSON, TIFF, or DICOM data |
+| `POST` | `/viewer/build` | Build a mesh from an uploaded NIfTI mask and open it in the viewer |
 
 After `POST /process`, the **Processed volume** page displays the unified
 `Volume` metadata: source format, input/output shape, spacing, units, output
@@ -56,6 +57,22 @@ preprocessing.
 Future route groups can be added for `/segmentation`, `/mesh`, `/metrics`, and
 `/export`.
 
+### 3D viewer
+
+`/viewer` shows meshes stored as `results/<experiment_id>/mesh.<format>` (the
+convention used by the experiment runner) in a WebGL viewer based on three.js,
+loaded from a CDN. Rotate with the mouse, zoom with the wheel, switch to
+wireframe, and download the mesh as `.glb`, `.stl`, `.obj` or `.ply`; formats
+that were not written to disk are converted on request.
+
+A mesh can also be built in the browser: upload a segmentation mask (`.nii` or
+`.nii.gz`), choose smoothing and decimation, and the result is stored as
+`results/mask_<timestamp>_<id>/mesh.glb`. The `results/` directory is not
+tracked by git. Its location can be changed with `results_dir` in
+`src/api/config.toml`.
+
+<img src="docs/images/3d_viewer.png" alt="3D viewer showing the swim bladder mesh built from the Gadus Morhua reference mask" width="640">
+
 ### Running tests
 
 With the virtual environment activated, run:
@@ -63,18 +80,6 @@ With the virtual environment activated, run:
 ```bash
 python -m pytest -q
 ```
-
-## Mesh reconstruction
-
-`src/pipeline/mesh.py` turns a 3D binary mask into a triangle mesh
-(Marching Cubes, Taubin smoothing, quadric decimation) and exports it as
-`.glb`, `.stl`, `.obj` or `.ply`.
-
-Meshes built from the three reference masks in `data/reference_masks/`
-(Bluefin Tuna, Gadus Morhua, Oreo fish):
-
-<img src="docs/images/reference_meshes.png" alt="Swim bladder meshes reconstructed from the reference masks" width="560">
-
 
 ## 📁 Project Structure
 

@@ -9,3 +9,9 @@ body {
   margin: 0 auto;
   cursor: ns-resize;
 }
+
+.param-help {
+  cursor: help;
+  color: var(--bs-secondary-color, #6c757d);
+  margin-left: 0.25rem;
+}

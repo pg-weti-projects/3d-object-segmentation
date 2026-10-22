@@ -1,0 +1,39 @@
+experiment:
+  id: "exp_gac_oreo"
+  description: "Analytical (geodesic active contour, 3D) on Oreo_fish"
+  seed: 42
+  repetitions: 3
+
+data:
+  input_path: "data/raw/Oreo_fish/density"
+  reference_mask_path: "data/reference_masks/Oreo_fish/Segmentation.nii.gz"
+  format: "dicom"
+
+preprocessing:
+  target_spacing: [1.0, 1.0, 1.0]
+  hu_range: [-1000, 200]
+  invert_hu: false
+  denoise: true
+
+algorithm:
+  name: "geodesic_active_contour"
+  parameters:
+    domain_size_mm: 80.0
+    compute_spacing_mm: 0.5
+    gac_alpha: 100.0
+    gac_sigma_mm: 1.0
+    init_radius_mm: 3.0
+    max_iterations: 300
+    smoothing: 1
+    threshold: "auto"
+    balloon: 1.0
+    stable_iterations: 5
+
+mesh:
+  algorithm: "marching_cubes"
+  smoothing_iterations: 15
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

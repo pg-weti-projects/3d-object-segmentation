@@ -1,5 +1,5 @@
 # ==============================================================================
-# TEMPLATE / EXAMPLE CONFIGURATION ( #TODO Task 0.2)
+# TEMPLATE / EXAMPLE CONFIGURATION
 # ==============================================================================
 
 experiment:
@@ -15,7 +15,7 @@ data:
 
 preprocessing:
   target_spacing: [1.0, 1.0, 1.0] # Spatial resampling to isotropic 1x1x1 mm voxels
-  hu_range: [-1000, 200]          # Hounsfield Units intensity scaling (min, max)
+  hu_range: [-10000, 10000]       # Hounsfield Units intensity scaling (min, max)
   invert_hu: false                # Optional HU inversion for air-filled structures
   denoise: true                   # Adaptive denoising
 

@@ -4,6 +4,78 @@ A research framework for **3D swim bladder segmentation from CT scans**, geometr
 
 ---
 
+## Flask Application
+
+Create and activate a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+On Windows:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+Install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+The `src/api/config.toml` file contains application runtime settings. Adjust it
+if needed, then start Flask:
+
+```bash
+python -m src.api.app
+```
+
+Open `http://127.0.0.1:5000` to verify that the standalone web application is
+running.
+
+### Application endpoints
+
+The Flask application is organized around separate routes, so further pages
+and endpoints can be added without changing the application entry point.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/` | Application entry point |
+| `GET` | `/health` | Health check |
+| `GET` | `/preprocess` | Display the volume preprocessing form |
+| `POST` | `/process` | Load and preprocess uploaded JSON, TIFF, or DICOM data |
+
+After `POST /process`, the **Processed volume** page displays the unified
+`Volume` metadata: source format, input/output shape, spacing, units, output
+value range, source SHA-256 hash, and the middle axial slice after
+preprocessing.
+
+Future route groups can be added for `/segmentation`, `/mesh`, `/metrics`, and
+`/export`.
+
+### Running tests
+
+With the virtual environment activated, run:
+
+```bash
+python -m pytest -q
+```
+
+## Mesh reconstruction
+
+`src/pipeline/mesh.py` turns a 3D binary mask into a triangle mesh
+(Marching Cubes, Taubin smoothing, quadric decimation) and exports it as
+`.glb`, `.stl`, `.obj` or `.ply`.
+
+Meshes built from the three reference masks in `data/reference_masks/`
+(Bluefin Tuna, Gadus Morhua, Oreo fish):
+
+<img src="docs/images/reference_meshes.png" alt="Swim bladder meshes reconstructed from the reference masks" width="560">
+
+
 ## 📁 Project Structure
 
 > **Note:** This is the planned target structure. Some components are not implemented yet.
@@ -18,9 +90,22 @@ A research framework for **3D swim bladder segmentation from CT scans**, geometr
 ├── results/                          # generated experiment outputs
 ├── src/
 │   ├── __init__.py
-│   ├── api/                          # Flask REST API
-│   │   ├── __init__.py
-│   │   └── app.py                    # API endpoints
+│   ├── api/
+│   │   ├── app.py                    # Flask app factory and entry point
+│   │   ├── config.py                 # TOML configuration loading
+│   │   ├── config.toml               # application runtime settings
+│   │   ├── routes/
+│   │   │   └── web.py                # HTML routes
+│   │   ├── services/                 # application services
+│   │   ├── templates/
+│   │   │   ├── base.html             # shared page layout
+│   │   │   └── index.html            # application entry page
+│   │   └── static/
+│   │       ├── css/
+│   │       │   └── app.css            # application styles
+│   │       └── js/
+│   │           ├── app.js             # shared frontend behavior
+│   │           └── webgl-viewer.js    # WebGL viewer
 │   ├── core/                         # data loading & preprocessing
 │   │   ├── volume.py                 # unified Volume (dataclass) representation
 │   │   ├── loaders.py                # DICOM, TIFF & JSON loaders
@@ -34,7 +119,6 @@ A research framework for **3D swim bladder segmentation from CT scans**, geometr
 │       ├── metrics.py                # Dice, IoU, HD95, ASSD & VS
 │       └── runner.py                 # deterministic experiment runner
 ├── tests/                            # unit & integration tests
-├── web/                              # frontend & WebGL 3D viewer
 ├── .gitignore
 ├── requirements.txt
 ├── LICENSE

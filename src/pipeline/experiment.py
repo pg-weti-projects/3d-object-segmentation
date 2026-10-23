@@ -25,6 +25,8 @@ from pathlib import Path
 
 import yaml
 
+from src.core.box import Box, BoxError
+
 
 class ExperimentConfigError(ValueError):
     """Raised when a config file is missing required fields or malformed."""
@@ -43,6 +45,8 @@ class DataConfig:
     input_path: str
     format: str | None = None  # 'dicom' | 'tiff' | 'voxels-json'; None = infer from suffix
     reference_mask_path: str | None = None  # optional - required only to compute metrics
+    box: Box | None = None  # optional box around the bladder (semi-automatic mode), see core/box.py
+    seed_zyx: tuple[int, int, int] | None = None  # optional voxel inside the bladder (preprocessed grid)
 
 
 @dataclass(frozen=True)
@@ -123,6 +127,8 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
                 input_path=data_raw["input_path"],
                 format=data_raw.get("format"),
                 reference_mask_path=data_raw.get("reference_mask_path"),
+                box=_parse_box(data_raw.get("box"), source),
+                seed_zyx=_parse_seed(data_raw.get("seed_zyx"), source),
             ),
             preprocessing=PreprocessingSettings(
                 target_spacing=_as_tuple(preprocessing_raw.get("target_spacing")),
@@ -171,4 +177,25 @@ def prepare_result_dir(config: ExperimentConfig, config_source: Path) -> Path:
 def _as_tuple(value) -> tuple | None:
     if value is None:
         return None
+    return tuple(value)
+
+
+def _parse_box(value, source: Path) -> Box | None:
+    if value is None:
+        return None
+    try:
+        return Box.from_mapping(value)
+    except BoxError as error:
+        raise ExperimentConfigError(f"{source}: invalid 'data.box' - {error}") from error
+
+
+def _parse_seed(value, source: Path) -> tuple[int, int, int] | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != 3
+        or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in value)
+    ):
+        raise ExperimentConfigError(f"{source}: 'data.seed_zyx' must be three non-negative integers [z, y, x]")
     return tuple(value)

@@ -18,6 +18,7 @@ from src.models.domain import (
     to_working_grid,
     touched_faces,
 )
+from src.models.contrast_init import region_on_grid
 from src.models.grid import Mask, WorkVolume, voxel_to_mm
 from src.models.params import GEODESIC_ACTIVE_CONTOUR, resolve_gac_params
 from src.models.result import SegmentationResult
@@ -116,7 +117,11 @@ class GeodesicActiveContour:
         t_edge = time.perf_counter() - t0
         center = [(seed[a] - domain.lo[a]) / step[a] for a in range(3)]
         radius_vox = float(p["init_radius_mm"]) / cs
-        init = init_ball(gimage.shape, center, radius_vox)
+        # With init_from="contrast" the contour starts from the thresholded region
+        # instead of a ball, and only has to settle on its boundary.
+        region = region_on_grid(roi, shape, domain, step, gimage.shape)
+        init = init_ball(gimage.shape, center, radius_vox) if region is None else region.astype(np.int8)
+        init_voxels = int(np.count_nonzero(init))
         logger.info(
             "GAC: obszar obliczeń %s–%s wokseli (%s, przycięty: %s), siatka obliczeń %s co %.3f mm, "
             "próg balonu %.4f%s",
@@ -203,6 +208,9 @@ class GeodesicActiveContour:
             "compute_shape": [int(n) for n in mask_c.shape],
             "gac_sigma_voxels": sigma_vox,
             "init_radius_voxels": radius_vox,
+            "init_source": roi.estimator if region is not None else "seed_ball",
+            "init_voxels": init_voxels,
+            "contrast": roi.meta.get("contrast") if region is not None else None,
             "threshold_used": threshold,
             "threshold_auto_adjusted": adjusted,
             "iterations": evo.iterations,

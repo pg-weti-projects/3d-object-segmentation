@@ -7,7 +7,24 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+SEED_BALL = "seed_ball"
+CONTRAST = "contrast"
+INIT_CHOICES: tuple[str, ...] = (SEED_BALL, CONTRAST)
+
+# Where a method starts from. "seed_ball" is the original behaviour: a small ball
+# around the seed point. "contrast" measures how the bladder differs from the
+# tissue and hands the method the region that follows from it (see
+# src/models/contrast_init.py). The three contrast_* settings override what the
+# measured regime would choose; null means "take it from the regime".
+CONTRAST_INIT_PARAMS: dict[str, Any] = {
+    "init_from": SEED_BALL,
+    "contrast_sigma_mm": None,
+    "contrast_fraction": None,
+    "contrast_open_mm": None,
+}
+
 DEFAULT_PARAMS: dict[str, Any] = {
+    **CONTRAST_INIT_PARAMS,
     "range_estimator": "percentile",
     "roi_radius_mm": 3.0,
     "intensity_levels": None,
@@ -32,6 +49,7 @@ DEFAULT_PARAMS: dict[str, Any] = {
 }
 
 _CHOICES: dict[str, tuple[str, ...]] = {
+    "init_from": INIT_CHOICES,
     "range_estimator": ("percentile", "minmax"),
     "init_anchor": ("corner", "center"),
     "data_term_sign": ("paper", "chan_vese"),
@@ -60,7 +78,38 @@ def resolve_params(cfg: Mapping[str, Any] | None) -> dict[str, Any]:
         raise ValueError("init_size_px, init_step_px i init_band_px muszą być >= 1")
     if int(params["max_iterations"]) < 1:
         raise ValueError("max_iterations musi być >= 1")
+    _check_contrast_init(params)
+    if params["init_from"] == CONTRAST and not (cfg and "data_term_sign" in cfg):
+        # The "paper" sign moves the contour outwards, which is what a small
+        # rectangle inside the object needs. Starting on the boundary of the
+        # measured region, that sign collapses it (Dice 0.02 instead of 0.94 on
+        # Oreo), so the standard Chan-Vese sign is used unless asked otherwise.
+        params["data_term_sign"] = "chan_vese"
     return params
+
+
+def _check_contrast_init(params: dict[str, Any]) -> None:
+    """Validate the settings of the contrast-driven start (shared by all three
+    methods). ``init_from`` itself is checked against _CHOICES by the caller."""
+    if params["init_from"] not in INIT_CHOICES:
+        raise ValueError(f"init_from={params['init_from']!r}; dozwolone: {INIT_CHOICES}")
+    for key in ("contrast_sigma_mm", "contrast_open_mm"):
+        params[key] = _positive(params[key], key, allow_none=True, allow_zero=True)
+    fraction = params["contrast_fraction"]
+    if fraction is not None:
+        if isinstance(fraction, bool) or not isinstance(fraction, (int, float)) or not 0 < fraction < 1:
+            raise ValueError(f"contrast_fraction={fraction!r}: oczekiwano liczby z (0, 1) albo null")
+        params["contrast_fraction"] = float(fraction)
+
+
+def contrast_init_kwargs(params: Mapping[str, Any]) -> dict[str, Any]:
+    """The contrast settings of a resolved parameter set, as keyword arguments of
+    ``src.models.contrast_init.contrast_roi``."""
+    return {
+        "sigma_mm": params.get("contrast_sigma_mm"),
+        "threshold_fraction": params.get("contrast_fraction"),
+        "open_mm": params.get("contrast_open_mm"),
+    }
 
 
 CHAN_VESE = "chan_vese"
@@ -69,6 +118,7 @@ GROWCUT = "growcut"
 ALGORITHMS: tuple[str, ...] = (CHAN_VESE, GEODESIC_ACTIVE_CONTOUR, GROWCUT)
 
 GAC_DEFAULT_PARAMS: dict[str, Any] = {
+    **CONTRAST_INIT_PARAMS,
     "domain_size_mm": 80.0,
     "compute_spacing_mm": 0.5,
     "gac_alpha": 100.0,
@@ -82,6 +132,7 @@ GAC_DEFAULT_PARAMS: dict[str, Any] = {
 }
 
 GROWCUT_DEFAULT_PARAMS: dict[str, Any] = {
+    **CONTRAST_INIT_PARAMS,
     "domain_size_mm": 80.0,
     "compute_spacing_mm": 0.5,
     "fg_radius_mm": 3.0,
@@ -162,6 +213,15 @@ def resolve_gac_params(cfg: Mapping[str, Any] | None) -> dict[str, Any]:
     if isinstance(balloon, bool) or not isinstance(balloon, (int, float)) or not math.isfinite(balloon):
         raise ValueError(f"balloon={balloon!r}: oczekiwano liczby (+ rozszerzanie, − kurczenie, 0 = brak)")
     out["balloon"] = float(balloon)
+    if p["init_from"] == CONTRAST and not (cfg and "balloon" in cfg):
+        # Starting from the measured region, the contour only has to settle on its
+        # boundary. The default balloon force would instead keep pushing it
+        # outwards until it fills the box, so it is off unless asked for.
+        out["balloon"] = 0.0
+    out["init_from"] = p["init_from"]
+    for key in ("contrast_sigma_mm", "contrast_fraction", "contrast_open_mm"):
+        out[key] = p[key]
+    _check_contrast_init(out)
     _check_grid_vs_domain(out)
     return out
 
@@ -184,6 +244,10 @@ def resolve_growcut_params(cfg: Mapping[str, Any] | None) -> dict[str, Any]:
         raise ValueError(
             f"bg_radius_mm={out['bg_radius_mm']} musi być większe od fg_radius_mm={out['fg_radius_mm']}"
         )
+    out["init_from"] = p["init_from"]
+    for key in ("contrast_sigma_mm", "contrast_fraction", "contrast_open_mm"):
+        out[key] = p[key]
+    _check_contrast_init(out)
     _check_grid_vs_domain(out)
     return out
 

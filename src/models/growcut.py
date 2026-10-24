@@ -20,6 +20,7 @@ from src.models.domain import (
     to_working_grid,
     touched_faces,
 )
+from src.models.contrast_init import growcut_seeds, region_on_grid
 from src.models.grid import Mask, WorkVolume, voxel_to_mm
 from src.models.params import GROWCUT, resolve_growcut_params
 from src.models.result import SegmentationResult
@@ -264,9 +265,17 @@ class GrowCut:
 
         fg_radius_vox = float(p["fg_radius_mm"]) / cs
         bg_radius_vox = None if p["bg_radius_mm"] is None else float(p["bg_radius_mm"]) / cs
-        fg = init_ball(image.shape, center, fg_radius_vox).astype(bool)
         faces, shell = background_seeds(image.shape, center, bg_radius_vox, p["neighborhood"])
-        bg = (faces | shell) & ~fg
+        # With init_from="contrast" the object seeds are the inside of the
+        # thresholded region and the tissue around it becomes background seeds,
+        # so the labels start on both sides of the boundary rather than at a point.
+        region = region_on_grid(roi, shape, domain, step, image.shape)
+        if region is None:
+            fg = init_ball(image.shape, center, fg_radius_vox).astype(bool)
+            tissue = np.zeros(image.shape, dtype=bool)
+        else:
+            fg, tissue = growcut_seeds(region, image, roi)
+        bg = (faces | shell | tissue) & ~fg
         labels = np.zeros(image.shape, dtype=np.int8)
         labels[fg] = OBJECT
         labels[bg] = BACKGROUND
@@ -371,6 +380,10 @@ class GrowCut:
             },
             "uses_roi_range": False,
             **p,
+            "init_source": roi.estimator if region is not None else "seed_ball",
+            "seeds_object_voxels": int(np.count_nonzero(fg)),
+            "seeds_background_voxels": int(np.count_nonzero(bg)),
+            "contrast": roi.meta.get("contrast") if region is not None else None,
             "spacing_mm": [float(s) for s in spacing],
             "domain": {
                 "lo_voxel": list(domain.lo),

@@ -9,9 +9,11 @@ from typing import Any
 import numpy as np
 
 from src.core.volume import Volume
+from src.models.contrast_init import contrast_roi
 from src.models.factory import make_segmenter
 from src.models.grid import SeedPoint, WorkVolume, voxel_to_mm
-from src.models.params import CHAN_VESE
+from src.models.params import CHAN_VESE, CONTRAST, contrast_init_kwargs, resolve_algorithm_params
+from src.models.result import unprocessed_phi_value
 from src.models.roi import RoiResult, roi_from_seed
 
 logger = logging.getLogger(__name__)
@@ -101,7 +103,13 @@ def segment_volume(
     invert_hu = bool(getattr(preprocessing, "invert_hu", False)) if preprocessing is not None else False
     work = to_work_volume(volume, hu_range, invert_hu)
     seed = seed_from_zyx(seed_zyx, work)
-    if name == CHAN_VESE:
+    resolved = resolve_algorithm_params(name, parameters)
+    if resolved.get("init_from") == CONTRAST:
+        # Measured once here, so that every method starts from the same region.
+        roi = contrast_roi(work, seed, **contrast_init_kwargs(resolved))
+        if not roi.roi_mask.any():
+            return _nothing_to_segment(volume, work, name, seed_zyx, roi)
+    elif name == CHAN_VESE:
         roi = roi_from_seed(work, seed, parameters)
     else:
         roi = RoiResult(seed=seed, roi_mask=np.zeros((1, 1, 1), bool), tmin=0.0, tmax=1.0, estimator="none")
@@ -118,4 +126,36 @@ def segment_volume(
     }
     return AnalyticalSegmentation(
         mask=mask, phi=phi, algorithm=name, status=result.status, params_used=params_used
+    )
+
+
+def _nothing_to_segment(
+    volume: Volume, work: WorkVolume, name: str, seed_zyx: Sequence[int], roi: RoiResult
+) -> AnalyticalSegmentation:
+    """An empty result when the measurement found nothing to separate: the bladder
+    at the seed point is as dense as the tissue around it (the Bluefin tuna scan).
+    Reported as an empty mask with the measurement, rather than letting a method
+    fail on a region that does not exist or return a shape it cannot justify."""
+    measured = roi.meta.get("contrast", {})
+    notes = list(measured.get("notes") or ["the contrast is too low to segment"])
+    logger.warning("Brak kontrastu do segmentacji: %s", "; ".join(notes))
+    shape = tuple(int(n) for n in volume.shape)
+    return AnalyticalSegmentation(
+        mask=np.zeros(shape, dtype=np.uint8),
+        phi=np.full(shape, unprocessed_phi_value(shape), dtype=np.float32),
+        algorithm=name,
+        status="empty",
+        params_used={
+            "algorithm": name,
+            "init_source": roi.estimator,
+            "contrast": measured,
+            "roi_meta": {key: value for key, value in roi.meta.items() if key != "contrast"},
+            "seed_zyx": [int(v) for v in seed_zyx],
+            "warnings": notes,
+            "n_warnings": len(notes),
+            "intensity_scaling": {
+                "hu_range": work.meta.get("hu_range"),
+                "invert_hu_undone": work.meta["invert_hu_undone"],
+            },
+        },
     )

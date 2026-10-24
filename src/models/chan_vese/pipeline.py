@@ -13,8 +13,9 @@ from src.models.chan_vese.binarize import binarize_slice, median_size_px
 from src.models.chan_vese.evolution import chan_vese_2d
 from src.models.chan_vese.init_contour import auto_init_contour
 from src.models.chan_vese.object_region import ObjectRegion, select_object_region
+from src.models.contrast_init import candidates_for
 from src.models.grid import Mask, WorkVolume
-from src.models.params import resolve_params
+from src.models.params import CONTRAST, resolve_params
 from src.models.result import SegmentationResult, signed_distance, unprocessed_phi_value
 from src.models.roi import RoiResult
 
@@ -39,18 +40,40 @@ class _SliceRun(NamedTuple):
     n_jobs: int
 
 
+def _contrast_init(init_slice: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
+    """The contour starts on the outline of the measured region on this slice
+    (``init_from: contrast``), instead of a rectangle grown from the centroid."""
+    phi0 = signed_distance(np.asarray(init_slice, dtype=bool))
+    info: dict[str, Any] = {
+        "size_px": int(np.count_nonzero(init_slice)),
+        "rect": None,
+        "steps": 0,
+        "force": None,
+        "p": None,
+        "u": None,
+        "v": None,
+        "anchor": "contrast",
+        "touched_edge": False,
+        "warnings": [],
+    }
+    return phi0, info
+
+
 def _segment_slice(
-    task: tuple[int, np.ndarray, tuple[int, int], dict[str, Any]],
+    task: tuple[int, np.ndarray, tuple[int, int], dict[str, Any], np.ndarray | None],
 ) -> tuple[int, np.ndarray, dict]:
-    k, binary_slice, centroid, s = task
-    phi0, init_info = auto_init_contour(
-        binary_slice,
-        centroid,
-        init_size_px=s["init_size_px"],
-        step_px=s["init_step_px"],
-        anchor=s["init_anchor"],
-        band_px=s["init_band_px"],
-    )
+    k, binary_slice, centroid, s, init_slice = task
+    if init_slice is not None and init_slice.any():
+        phi0, init_info = _contrast_init(init_slice)
+    else:
+        phi0, init_info = auto_init_contour(
+            binary_slice,
+            centroid,
+            init_size_px=s["init_size_px"],
+            step_px=s["init_step_px"],
+            anchor=s["init_anchor"],
+            band_px=s["init_band_px"],
+        )
     result = chan_vese_2d(
         binary_slice.astype(np.float64),
         phi0,
@@ -125,7 +148,8 @@ class ImprovedChanVese:
         binarization = self._binarization_params(volume, roi)
         region = self._object_region(volume, roi, binarization)
         settings = self._cv_settings(volume)
-        run = self._run_slices(volume, region, settings, self._n_jobs())
+        init_region = self._init_region(volume, roi)
+        run = self._run_slices(volume, region, settings, self._n_jobs(), init_region)
         status = "ok" if run.mask.any() else "empty"
         if run.warnings:
             logger.warning("Segmentacja: %d ostrzeżeń (pierwsze: %s)", len(run.warnings), run.warnings[0])
@@ -144,6 +168,17 @@ class ImprovedChanVese:
             meta={"seed_source": roi.seed.source, "algorithm": "improved_chan_vese_2d"},
         )
         return SegmentationResult(mask=out_mask, phi=run.phi, params_used=params_used, status=status)
+
+    def _init_region(self, volume: WorkVolume, roi: RoiResult) -> np.ndarray | None:
+        """The measured region, when the caller asked for ``init_from: contrast``
+        and it covers this volume; each slice's contour then starts on it."""
+        if self.params.get("init_from") != CONTRAST:
+            return None
+        mask = np.asarray(roi.roi_mask, dtype=bool)
+        if mask.shape != tuple(volume.shape) or not mask.any():
+            logger.warning("init_from=contrast: brak obszaru dla tego wolumenu — start z prostokąta")
+            return None
+        return mask
 
     def _binarization_params(self, volume: WorkVolume, roi: RoiResult) -> _BinarizationParams:
         p = self.params
@@ -165,9 +200,18 @@ class ImprovedChanVese:
     def _object_region(self, volume: WorkVolume, roi: RoiResult, b: _BinarizationParams) -> ObjectRegion:
         p = self.params
         data = volume.data
-        binary3d = np.empty(volume.shape, dtype=bool)
-        for k in range(volume.shape[2]):
-            binary3d[:, :, k] = binarize_slice(data[:, :, k], b.tmin, b.tmax, b.median_size, b.gain, b.levels)
+        binary3d = None
+        if p.get("init_from") == CONTRAST:
+            # The per-slice window alone also catches the air around the body on a
+            # cropped scan, and the object region then runs away through it. With
+            # init_from=contrast the binary image is limited to the body.
+            binary3d = candidates_for(volume, roi)
+        if binary3d is None:
+            binary3d = np.empty(volume.shape, dtype=bool)
+            for k in range(volume.shape[2]):
+                binary3d[:, :, k] = binarize_slice(
+                    data[:, :, k], b.tmin, b.tmax, b.median_size, b.gain, b.levels
+                )
         return select_object_region(
             binary3d,
             roi.seed.voxel,
@@ -201,17 +245,29 @@ class ImprovedChanVese:
         return (os.cpu_count() or 1) if n_jobs < 0 else n_jobs
 
     def _run_slices(
-        self, volume: WorkVolume, region: ObjectRegion, settings: dict[str, Any], n_jobs: int
+        self,
+        volume: WorkVolume,
+        region: ObjectRegion,
+        settings: dict[str, Any],
+        n_jobs: int,
+        init_region: np.ndarray | None = None,
     ) -> _SliceRun:
         shape = volume.shape
         sx, sy, _ = volume.spacing
         binary = region.binary
         slice_ids, slice_meta = _slice_meta(region.object_mask, sx * sy)
 
-        def tasks() -> Iterator[tuple[int, np.ndarray, tuple[int, int], dict[str, Any]]]:
+        def tasks() -> Iterator[tuple[int, np.ndarray, tuple[int, int], dict[str, Any], Any]]:
             for k in slice_ids:
                 m = slice_meta[int(k)]
-                yield int(k), binary[:, :, k].copy(), (m["centroid"][0], m["centroid"][1]), settings
+                init_slice = None if init_region is None else init_region[:, :, k].copy()
+                yield (
+                    int(k),
+                    binary[:, :, k].copy(),
+                    (m["centroid"][0], m["centroid"][1]),
+                    settings,
+                    init_slice,
+                )
 
         phi_vol = np.full(shape, unprocessed_phi_value(shape), dtype=np.float32)
         mask = np.zeros(shape, dtype=bool)

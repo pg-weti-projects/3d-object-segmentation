@@ -27,3 +27,6 @@ data/**/*.json
 
 # raw scans (hundreds of MB; keep them local)
 data/raw/
+results/*
+!results/.gitkeep
+

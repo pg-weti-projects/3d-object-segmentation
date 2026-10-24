@@ -74,6 +74,74 @@ annotation. For comparison, the box holds 1792 mL of gas in total, almost all of
 it the air around the fish, connected into one component that overlaps the mask
 by Dice 0.06.
 
+**The mask is where it should be, though.** The obvious suspicion - that it is
+misaligned - was checked and does not hold. It lines up with the volume grid
+without any permutation, and against a body mask (everything above -300 HU,
+largest component, holes filled) it sits:
+
+| | |
+|---|---|
+| inside the body | 84.3% (63 mL outside) |
+| inside the body's silhouette (per-slice convex hull, which closes channels) | 98.4% (6.3 mL outside, in 48 scattered parts, largest 5.8 mL) |
+| HU of the part "outside the body" | -960, i.e. air |
+
+So the 63 mL is not the mask poking out of the fish: it is gas *within* the
+fish's outline that is connected to the air outside, which is why a filled body
+mask excludes it and why `use_hull` deliberately refuses to follow it. In a dead,
+processed fish that is what a bladder open to the outside looks like.
+
+What is left is a mask of 403 mL, correctly placed, of which about 340 mL has the
+density of soft tissue and 63 mL is gas open to the outside. Whether that means a
+collapsed bladder filled with fluid, or an outline of the whole organ including
+its wall and contents, is a question for whoever drew it - not something a
+segmentation parameter can settle.
+
+**Nor can it be tuned.** Parameters decide which image feature a method
+follows, so before calling the tuna hopeless, the three features a method could
+possibly follow were measured at the boundary of its reference mask. None of them
+is there (`scripts/` has no case for this; the numbers come from a one-off probe
+on the 3.5 mm series, box of the mask grown by 25%):
+
+| feature | at the mask boundary | control |
+|---|---|---|
+| gradient magnitude (is a bladder wall visible?) | 3.0 | 5.3 inside the mask, 3.2 just outside, 2.3 on a surface shifted by 12 voxels |
+| enclosed gas to grow or inflate from | 3.1 mL in 8 parts, Dice 0.001 (its convex hull: 0.001) | of the 63 mL of gas-density voxels in the mask, nearly all are connected to the air outside the fish |
+| local standard deviation in 5 mm (texture) | 13.0 inside the mask | 7.6 just outside; thresholding it gives at best 974 mL at Dice 0.170 |
+
+The boundary of this mask is not an edge, is not a gas border, and is not a
+texture border - the gradient on it is *lower* than inside the mask and no higher
+than on an arbitrary surface 12 voxels away. There is no setting of
+`threshold_fraction`, `balloon`, `gac_alpha` or seed radius that makes a method
+follow something the image does not contain. What the mask does have is more
+structure *inside* it than around it, which is consistent with a hand-drawn
+outline of an organ whose wall this scan does not resolve.
+
+If the annotation is the whole organ rather than its gas space, the thing to
+follow would be the bladder wall - so that was measured too, on both series, as
+the in-plane gradient (the wall is thin, and a 7 mm slice averages it away):
+
+| series | on the mask boundary | inside | just outside | a surface 15 voxels away |
+|---|---|---|---|---|
+| 3.5 mm | 96.5 | 244.5 | 104.1 | 68.0 |
+| 1 mm | 118.3 | 114.3 | 130.8 | 93.0 |
+
+At 1 mm, where slices are 2 mm thick instead of 7 mm, the boundary is
+indistinguishable from the tissue on either side of it, and only 22% of it falls
+in the top 10% of the gradient, against 17% for an arbitrary surface nearby. A
+visible wall would put that share at 60-90%. So the organ's outline is not in
+this scan either, at either resolution.
+
+That matters beyond the tuna: if the tuna mask is an organ outline and the Oreo
+mask is a gas space (there the bladder is gas at density 1 and a threshold alone
+reaches Dice 0.95), the two datasets do not define the same target, and a single
+Dice column across species compares two different tasks. It is worth stating in
+the report which of the three masks outlines what.
+
+The honest ways forward are therefore not parameters: ask what the annotation
+outlined (and from which series), or give the problem to a model that carries a
+shape prior rather than an intensity rule - which is what the learned methods in
+the runner's table are for.
+
 Three things had to be fixed before any of this could be measured, and all three
 are worth knowing:
 

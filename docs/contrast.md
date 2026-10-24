@@ -161,6 +161,51 @@ are worth knowing:
   time into the output array, and the 918-slice series loads in about 4 seconds
   in 1 GB instead of being killed at 3 GB.
 
+## What the three masks actually outline
+
+The tuna mask was compared with the other two in terms of each scan's own
+intensity distribution, which makes the three comparable despite their different
+units (density in kg/m3, raw TIFF values, HU):
+
+| mask | volume | mask p5 / p50 / p95 | above the scan's p99 | parts | holes |
+|---|---|---|---|---|---|
+| Oreo | 31.2 mL | 1 / 1 / 1 (pure gas) | 0.1% | 4 | 0 |
+| Gadus Morhua | 2.4 mL | 18263 / 18513 / 19090 (one soft-tissue band) | 1.3% | 1 | 0 |
+| Bluefin tuna | 402.5 mL | -983 / 17 / 326 (air to bone) | **8.0% = 32 mL** | 1 | 0 |
+
+The first two are homogeneous: the Oreo mask is the gas space and nothing else,
+the Gadus mask is a narrow band of soft tissue with no gas in it. Both look like
+a careful outline of one structure.
+
+The tuna mask is not. It spans the full range of the scan, from air at -983 HU to
+bone at +326 HU, and 8% of it (32 mL) is denser than 99% of the whole scan. Of
+that, 19.7 mL is a single connected blob of bone density on slices 107-139 - a
+swim bladder contains no bone, so that part is an error under any definition of
+the target. Shrinking the mask does not reach a cleaner core either: eroded by
+12 mm it is down to 21 mL and still 44% muscle density.
+
+Two candidates for review were derived and left in `results/tuna_mask_review/`
+(the reference itself is untouched): the mask without the bone blob (374 mL) and
+the gas inside the mask (44.7 mL). Running the methods against them settles what
+is wrong and what is not:
+
+| target | best Dice | what it means |
+|---|---|---|
+| the reference, 402.5 mL | empty mask | the bladder at the seed is denser than the tissue |
+| without the bone, 374 mL | 0.301 (GrowCut) | removing the bone changes nothing; 125 mL of muscle density remains |
+| the gas only, 44.7 mL | 0.736 (GrowCut) | **circular** - that target was made with the same threshold the method uses |
+
+The last row is not a result and must not be reported as one; it only shows that
+the pipeline works on this scan once the target is something the image contains.
+
+So the conclusion is narrower than "the tuna mask is wrong" and sharper than "the
+tuna is hard": **the tuna annotation cannot be verified or reproduced from its
+own scan, and it contains 20 mL of a structure that is certainly not bladder.**
+Whether the rest of it is a collapsed, fluid-filled bladder drawn from anatomy or
+an outline that took in the surrounding tissue is a question for whoever drew it.
+Until that is answered, the tuna does not belong in a results table next to the
+other two, because its target is not of the same kind.
+
 ## What it changes for each method
 
 Each method needed one more thing than the region itself, found by measuring:

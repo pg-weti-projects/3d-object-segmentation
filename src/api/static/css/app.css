@@ -15,3 +15,24 @@ body {
   color: var(--bs-secondary-color, #6c757d);
   margin-left: 0.25rem;
 }
+
+#axial-canvas {
+  touch-action: none;
+}
+
+.box-overlay {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid #ffc107;
+  background: rgba(255, 193, 7, 0.12);
+  pointer-events: none;
+}
+
+.box-overlay[hidden] {
+  display: none;
+}
+
+.box-overlay-other-slice {
+  border-style: dashed;
+  opacity: 0.55;
+}

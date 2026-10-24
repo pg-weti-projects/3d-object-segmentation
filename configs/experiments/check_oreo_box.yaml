@@ -1,0 +1,25 @@
+experiment:
+  id: "check_oreo_box"
+  repetitions: 2
+
+data:
+  input_path: "data/raw/Oreo_fish/density"
+  reference_mask_path: "data/reference_masks/Oreo_fish/Segmentation.nii.gz"
+  format: "dicom"
+  # box drawn around the bladder (mm from the first voxel, [z, y, x]) and a voxel inside it
+  box:
+    min_mm: [0, 147, 15]
+    max_mm: [165, 207, 48]
+  seed_zyx: [17, 59, 10]
+
+algorithm:
+  name: "box_region"
+  parameters: {}
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

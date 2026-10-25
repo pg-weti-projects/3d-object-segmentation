@@ -1,30 +1,3 @@
-"""
-src/models/box_region.py
-
-Segmentation of the swim bladder inside a box (semi-automatic mode). It expects
-the volume cut to the box (see ``src/core/roi.py``) with the bladder around the
-centre of the box, or ``seed_zyx`` pointing into it.
-
-One rule covers both gas-filled and "no gas" bladders:
-
-1. the volume is smoothed (``sigma_mm``);
-2. the *object level* is the median in a small ball around the seed;
-3. the *tissue level* is the median of the tissue class (Otsu split of the box);
-4. the threshold lies ``threshold_fraction`` of the way from the object level to
-   the tissue level (0.5 = halfway, which is also where partial-volume voxels at
-   the edge of a gas pocket fall);
-5. candidates are limited to the per-axis convex hull of the tissue, so gas that
-   is open to the air outside the body is not followed outwards;
-6. a small opening cuts thin leaks, the component under the seed is kept and its
-   holes are filled.
-
-The bladder is expected to be darker than the tissue (gas, or fluid with a lower
-density); use ``bladder_is_dark: false`` for the opposite.
-
-Contract: ``segment(volume, parameters) -> uint8 mask`` with the shape ``(z, y, x)``
-of the volume it received. An empty mask means nothing was found.
-"""
-
 from __future__ import annotations
 
 import logging

@@ -161,6 +161,51 @@ are worth knowing:
   time into the output array, and the 918-slice series loads in about 4 seconds
   in 1 GB instead of being killed at 3 GB.
 
+## The same method, three different targets
+
+A Dice column across the three species compares three different tasks, so it is
+worth being explicit about what the methods do and what each dataset asks of
+them.
+
+**What the methods do is the same everywhere.** Chan-Vese, the geodesic active
+contour, GrowCut and `box_region` all answer one question: *which connected
+region around the seed point is darker than the tissue around it*. They differ
+only in how they settle its boundary. None of them looks for "gas"; gas is
+simply what that region happens to be when the bladder holds any.
+
+**What each dataset asks for is not the same.** Measured on the volume inside the
+box, with the whole annotation against a shell of tissue around it:
+
+| dataset | the annotation is | contrast of the whole target | is the target the darker region? |
+|---|---|---|---|
+| Oreo | the gas space (its 5th to 95th percentile is pure gas) | +0.886 | yes, it is exactly that region |
+| Gadus | a fluid-filled organ, no gas | +0.075 | yes, but only just |
+| Bluefin tuna | an organ of which 12% is gas | +0.002 | no - only the gas part is |
+
+So on the tuna the methods are not "focusing on gas instead of the organ" by
+mistake: the organ is not a darker region at all, and the only darker thing
+inside it is its remaining gas. That is a property of the scan, not a choice we
+made.
+
+**How far the data can be pushed.** `scripts/threshold_ceiling.py` sweeps a
+single intensity threshold over the whole range, under the same restriction to
+the body the methods use, and reports the best Dice it can reach. That is the
+ceiling for this whole family of methods:
+
+| dataset | contrast | regime | best possible Dice | `box_region` reaches |
+|---|---|---|---|---|
+| Oreo | 0.882 | high | 0.940 | **0.949** |
+| Gadus | 0.088 | low | 0.663 | 0.643 |
+| Bluefin tuna | 0.000 | none | 0.200 | 0.163 |
+
+On every dataset the method is within a few points of the best any threshold
+could do, and on Oreo it is at it. The spread between 0.95, 0.64 and 0.16 is
+therefore not a story about the method working on one fish and failing on
+another - it is the spread of how much of each annotated target an intensity
+rule can see at all. Reporting the ceiling next to the Dice keeps that honest:
+0.163 out of a possible 0.200 says something quite different from 0.163 on its
+own.
+
 ## What the three masks actually outline
 
 The tuna mask was compared with the other two in terms of each scan's own

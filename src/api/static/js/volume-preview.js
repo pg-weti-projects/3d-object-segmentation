@@ -1,34 +1,37 @@
 // window.volumePreviewData: nested [Z][Y][X] floats in [0, 1];
 // window.volumePreviewSpacing: [z, y, x] voxel size in mm.
 (() => {
-const slices = window.volumePreviewData;
-const spacing = window.volumePreviewSpacing || [1, 1, 1];
+const previewContainer = document.querySelector("[data-volume-slices]");
+const inlineSlices = JSON.parse(previewContainer?.dataset.volumeSlices || "null");
+const spacing = JSON.parse(previewContainer?.dataset.volumeSpacing || "[1, 1, 1]");
+const previewUrl = JSON.parse(previewContainer?.dataset.volumePreviewUrl || "null");
 const MIN_DISPLAY_SIZE = 512;
 
-if (!slices || !slices.length) {
+if (!previewContainer || (!inlineSlices && !previewUrl)) {
   return;
 }
 
-const depth = slices.length;
-const height = slices[0].length;
-const width = slices[0][0].length;
+const shape = JSON.parse(previewContainer?.dataset.volumeShape || "[0, 0, 0]");
+const depth = inlineSlices ? inlineSlices.length : shape[0];
+const height = inlineSlices ? inlineSlices[0].length : shape[1];
+const width = inlineSlices ? inlineSlices[0][0].length : shape[2];
 const [spacingZ, spacingY, spacingX] = spacing;
 
 const planes = {
   axial: {
     axis: "Z", count: depth, columns: width, rows: height,
     columnSpacing: spacingX, rowSpacing: spacingY,
-    value: (index, row, column) => slices[index][row][column],
+    value: (index, row, column) => inlineSlices[index][row][column],
   },
   coronal: {
     axis: "Y", count: height, columns: width, rows: depth,
     columnSpacing: spacingX, rowSpacing: spacingZ,
-    value: (index, row, column) => slices[row][index][column],
+    value: (index, row, column) => inlineSlices[row][index][column],
   },
   sagittal: {
     axis: "X", count: width, columns: height, rows: depth,
     columnSpacing: spacingY, rowSpacing: spacingZ,
-    value: (index, row, column) => slices[row][column][index],
+    value: (index, row, column) => inlineSlices[row][column][index],
   },
 };
 
@@ -53,11 +56,42 @@ Object.entries(planes).forEach(([name, plane]) => {
   canvas.width = Math.max(1, Math.round(physicalWidth * scale));
   canvas.height = Math.max(1, Math.round(physicalHeight * scale));
   const context = canvas.getContext("2d");
+  let planeData = inlineSlices;
+  let loadedIndex = null;
+  let requestController = null;
 
   function render(index) {
+    if (!inlineSlices && loadedIndex !== index) {
+      if (requestController) {
+        requestController.abort();
+      }
+      requestController = new AbortController();
+      fetch(`${previewUrl}?plane=${name}&index=${index}`, {signal: requestController.signal})
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error("Could not load preview slice.");
+          }
+          return response.blob();
+        })
+        .then((blob) => createImageBitmap(blob))
+        .then((bitmap) => {
+          loadedIndex = index;
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          bitmap.close();
+          label.textContent = `(${plane.axis}=${index} / ${plane.count - 1})`;
+        })
+        .catch((error) => {
+          if (error.name === "AbortError") return;
+          label.textContent = "Preview unavailable";
+        });
+      return;
+    }
     for (let row = 0; row < plane.rows; row += 1) {
       for (let column = 0; column < plane.columns; column += 1) {
-        const value = Math.round(plane.value(index, row, column) * 255);
+        const value = Math.round((
+          inlineSlices ? plane.value(index, row, column) : (planeData[row]?.[column] ?? 0)
+        ) * 255);
         const pixel = (row * plane.columns + column) * 4;
         image.data[pixel] = value;
         image.data[pixel + 1] = value;
@@ -77,6 +111,11 @@ Object.entries(planes).forEach(([name, plane]) => {
   }
 
   slider.addEventListener("input", () => render(Number(slider.value)));
+  document.querySelectorAll(`.slice-step[data-plane="${name}"]`).forEach((button) => {
+    button.addEventListener("click", () => {
+      show(Number(slider.value) + Number(button.dataset.step));
+    });
+  });
 
   canvas.addEventListener("wheel", (event) => {
     event.preventDefault();

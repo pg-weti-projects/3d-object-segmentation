@@ -13,13 +13,23 @@
       <a class="navbar-brand fw-semibold" href="{{ url_for('web.index') }}">3D Segmentation</a>
       <div class="navbar-nav">
         <a class="nav-link" href="{{ url_for('web.index') }}">Home</a>
-        <a class="nav-link active" href="{{ url_for('web.preprocess_page') }}">Volume Preprocessing</a>
+        <a class="nav-link active" href="{{ url_for('web.preprocess_page') }}">Raw Data Preprocessing</a>
+        <a class="nav-link" href="{{ url_for('web.viewer_page') }}">3D Viewer</a>
       </div>
     </div>
   </nav>
-  <main class="container py-5">
+  <main class="container py-5"
+        data-volume-slices='{{ result.slices | default(none) | tojson }}'
+        data-volume-shape='{{ result.output_shape | tojson }}'
+        data-volume-spacing='{{ result.output_spacing | tojson }}'
+        data-volume-preview-url='{{ preview_url | default(none) | tojson }}'>
     <div class="mb-4">
-      <h1 class="fw-bold">Processed volume</h1>
+      <div class="d-flex justify-content-between align-items-center gap-3">
+        <h1 class="fw-bold mb-0">
+          Processed volume{% if dataset_name %} - {{ dataset_name }}{% endif %}
+        </h1>
+        <a class="btn btn-outline-primary flex-shrink-0" href="{{ url_for('web.preprocess_page') }}">Back</a>
+      </div>
       <p class="text-secondary">The input has been converted to the unified Volume representation.</p>
     </div>
     <section class="card border-0 shadow-sm">
@@ -50,8 +60,17 @@
                       title="Scroll to change the {{ title | lower }} slice"></canvas>
             </div>
             <label class="form-label mt-3" for="{{ plane }}-slider">{{ axis }} slice</label>
-            <input class="form-range" type="range" id="{{ plane }}-slider" data-plane="{{ plane }}"
-                   min="0" max="{{ last }}" value="{{ last // 2 }}">
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-sm btn-outline-secondary slice-step"
+                      type="button" data-plane="{{ plane }}" data-step="-1"
+                      aria-label="Previous {{ title | lower }} slice">−</button>
+              <input type="range" id="{{ plane }}-slider" data-plane="{{ plane }}"
+                   min="0" max="{{ last }}" value="{{ last // 2 }}"
+                   class="form-range flex-grow-1 mb-0">
+              <button class="btn btn-sm btn-outline-secondary slice-step"
+                      type="button" data-plane="{{ plane }}" data-step="1"
+                      aria-label="Next {{ title | lower }} slice">+</button>
+            </div>
             <div class="d-flex justify-content-between small text-secondary">
               <span>{{ axis }}=0</span>
               <span>{{ axis }}={{ last }}</span>
@@ -61,12 +80,7 @@
       </div>
       {% endfor %}
     </div>
-    <a class="btn btn-outline-primary mt-4" href="{{ url_for('web.preprocess_page') }}">Process another volume</a>
   </main>
-  <script>
-    window.volumePreviewData = {{ result.slices | tojson }};
-    window.volumePreviewSpacing = {{ result.output_spacing | tojson }};
-  </script>
   <script src="{{ url_for('static', filename='js/volume-preview.js') }}"></script>
 </body>
 </html>

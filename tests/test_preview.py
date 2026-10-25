@@ -45,5 +45,5 @@ def test_result_page_shows_three_planes():
     for plane, last in (("axial", 2), ("coronal", 3), ("sagittal", 4)):
         assert f'id="{plane}-canvas"' in page
         assert f'id="{plane}-slider" data-plane="{plane}"\n                   min="0" max="{last}"' in page
-    assert "window.volumePreviewData = [[[" in page
-    assert "window.volumePreviewSpacing = [1.0, 1.0, 1.0]" in page
+    assert "data-volume-slices='[[[" in page
+    assert "data-volume-spacing='[1.0, 1.0, 1.0]'" in page

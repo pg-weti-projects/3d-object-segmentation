@@ -21,3 +21,14 @@ htmlcov/
 # model training
 torch/Totalsegmentator_dataset_small_v201
 torch/checkpoints/
+
+# Data files
+*.nii
+*.nii.gz
+*.dcm
+*.tif
+*.tiff
+data/**/*.json
+results/*
+!results/.gitkeep
+

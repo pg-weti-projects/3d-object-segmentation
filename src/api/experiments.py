@@ -1,23 +1,3 @@
-"""
-src/api/experiments.py
-
-Reads what the experiment runner left in ``results/`` and turns it into the rows
-and the chart the comparison page shows.
-
-One run is one directory written by ``src/pipeline/runner.py``:
-
-    results/<experiment id>/
-        config.yaml     the experiment it came from
-        metrics.json    dice, iou, hd95_mm ... (only when a reference mask was given)
-        mask.nii.gz
-        mesh.glb        when the mask was not empty
-        run.log
-
-Nothing here fails on a half-written or hand-made directory: a run with no
-metrics, an unreadable file or a missing config still appears, with whatever
-could be read.
-"""
-
 from __future__ import annotations
 
 import json

@@ -1,83 +1,50 @@
 const fileInput = document.getElementById("volume");
 const form = document.getElementById("preprocess-form");
 
-if (fileInput) {
-  fileInput.addEventListener("change", () => {
-    if (fileInput.files.length) {
-      const help = fileInput.nextElementSibling;
-      if (help) {
-        help.textContent = `${fileInput.files.length} file(s) selected.`;
+async function monitorDatasetLoading() {
+  const banner = document.getElementById("dataset-load-status");
+  if (!banner) return;
+  try {
+    const response = await fetch("/api/datasets/status");
+    const state = await response.json();
+    if (state.status === "pending" || state.status === "loading") {
+      banner.className = "alert alert-info rounded-0 mb-0";
+      if (banner.dataset.loading !== "true") {
+        banner.innerHTML = `
+          <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+          <span>Loading server data...</span>
+          <span class="visually-hidden">Please wait while the server data is indexed.</span>
+        `;
+        banner.dataset.loading = "true";
+      }
+      window.setTimeout(monitorDatasetLoading, 1000);
+    } else if (state.status === "error") {
+      delete banner.dataset.loading;
+      banner.className = "alert alert-danger rounded-0 mb-0";
+      banner.textContent = `Failed to load server data: ${state.error}`;
+    } else {
+      delete banner.dataset.loading;
+      if (document.querySelector("[data-datasets-loading]")) {
+        window.setTimeout(() => window.location.reload(), 300);
+      } else {
+        banner.className = "alert alert-info rounded-0 mb-0 d-none";
       }
     }
-  });
-
-  fileInput.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    fileInput.classList.add("border-primary");
-  });
-
-  fileInput.addEventListener("dragleave", () => {
-    fileInput.classList.remove("border-primary");
-  });
-
-  fileInput.addEventListener("drop", (event) => {
-    event.preventDefault();
-    fileInput.classList.remove("border-primary");
-    const items = [...event.dataTransfer.items];
-    const entries = items
-      .map((item) => item.webkitGetAsEntry && item.webkitGetAsEntry())
-      .filter(Boolean);
-
-    if (entries.some((entry) => entry.isDirectory)) {
-      readEntries(entries).then((files) => {
-        const transfer = new DataTransfer();
-        files.forEach((file) => transfer.items.add(file));
-        fileInput.files = transfer.files;
-        fileInput.dispatchEvent(new Event("change"));
-      });
-    } else if (event.dataTransfer.files.length) {
-      fileInput.files = event.dataTransfer.files;
-      fileInput.dispatchEvent(new Event("change"));
-    }
-  });
-}
-
-async function readEntries(entries) {
-  const files = [];
-  for (const entry of entries) {
-    if (entry.isFile) {
-      files.push(await readFile(entry));
-    } else if (entry.isDirectory) {
-      const reader = entry.createReader();
-      let children = [];
-      let batch;
-      do {
-        batch = await readDirectoryBatch(reader);
-        children = children.concat(batch);
-      } while (batch.length);
-      files.push(...await readEntries(children));
-    }
+  } catch (_) {
+    banner.className = "alert alert-warning rounded-0 mb-0";
+    banner.textContent = "Unable to check the server data loading status.";
   }
-  return files;
 }
-
-function readFile(entry) {
-  return new Promise((resolve, reject) => entry.file(resolve, reject));
-}
-
-function readDirectoryBatch(reader) {
-  return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
-}
+monitorDatasetLoading();
 
 if (form) {
   form.addEventListener("submit", (event) => {
-    if (!fileInput.files.length) {
+    const datasetSource = document.getElementById("dataset_source");
+    if (datasetSource && !datasetSource.value) {
       event.preventDefault();
-      fileInput.focus();
-      fileInput.setCustomValidity("Select an input file or a folder of slices.");
-      fileInput.reportValidity();
-    } else {
-      fileInput.setCustomValidity("");
+      datasetSource.focus();
+      datasetSource.setCustomValidity("Select a validated server dataset source.");
+      datasetSource.reportValidity();
     }
   });
 }

@@ -1,8 +1,27 @@
-// window.volumePreviewData: nested [Z][Y][X] floats in [0, 1];
-// window.volumePreviewSpacing: [z, y, x] voxel size in mm.
+// Three-plane preview of a volume.
+//
+// It takes its data from whichever of the two sources is present:
+//   * the preprocessing page puts it on the container as data-volume-* attributes
+//     and may give a URL to fetch one slice at a time instead of inlining them;
+//   * the segmentation page puts it in window.volumePreview* globals, together
+//     with a mask to overlay and a seed point to show and to pick by clicking.
 (() => {
-const slices = window.volumePreviewData;
-const spacing = window.volumePreviewSpacing || [1, 1, 1];
+const container = document.querySelector("[data-volume-slices]");
+const attributes = container ? container.dataset : {};
+const parse = (value, fallback) => {
+  if (value === undefined || value === null) return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed === null ? fallback : parsed;
+  } catch (error) {
+    return fallback;
+  }
+};
+
+const inlineSlices = window.volumePreviewData || parse(attributes.volumeSlices, null);
+const spacing = window.volumePreviewSpacing || parse(attributes.volumeSpacing, [1, 1, 1]);
+const previewUrl = parse(attributes.volumePreviewUrl, null);
+const attributeShape = parse(attributes.volumeShape, [0, 0, 0]);
 const mask = window.volumePreviewMask || null;
 let seed = window.volumePreviewSeed || null;
 const pickInput = window.volumePreviewPickSeed
@@ -10,13 +29,15 @@ const pickInput = window.volumePreviewPickSeed
 const MASK_OPACITY = 0.45;
 const MIN_DISPLAY_SIZE = 512;
 
-if (!slices || !slices.length) {
+if (!inlineSlices && !previewUrl) {
   return;
 }
 
-const depth = slices.length;
-const height = slices[0].length;
-const width = slices[0][0].length;
+const depth = inlineSlices ? inlineSlices.length : attributeShape[0];
+const height = inlineSlices ? inlineSlices[0].length : attributeShape[1];
+const width = inlineSlices ? inlineSlices[0][0].length : attributeShape[2];
+// On the segmentation page a large volume is previewed every step-th voxel, and
+// the seed is given in full-volume voxels.
 const step = window.volumePreviewStep || [1, 1, 1];
 const fullShape = window.volumePreviewShape || [depth, height, width];
 const toPreview = (point) => point.map((v, i) => Math.floor(v / step[i]));
@@ -28,7 +49,7 @@ const planes = {
   axial: {
     axis: "Z", axisIndex: 0, count: depth, columns: width, rows: height,
     columnSpacing: spacingX, rowSpacing: spacingY,
-    value: (index, row, column) => slices[index][row][column],
+    value: (index, row, column) => inlineSlices[index][row][column],
     masked: (index, row, column) => mask[index][row][column],
     seed: () => { const s = previewSeed(); return s && [s[0], s[1], s[2]]; },
     toSeed: (index, row, column) => [index, row, column],
@@ -36,7 +57,7 @@ const planes = {
   coronal: {
     axis: "Y", axisIndex: 1, count: height, columns: width, rows: depth,
     columnSpacing: spacingX, rowSpacing: spacingZ,
-    value: (index, row, column) => slices[row][index][column],
+    value: (index, row, column) => inlineSlices[row][index][column],
     masked: (index, row, column) => mask[row][index][column],
     seed: () => { const s = previewSeed(); return s && [s[1], s[0], s[2]]; },
     toSeed: (index, row, column) => [row, index, column],
@@ -44,7 +65,7 @@ const planes = {
   sagittal: {
     axis: "X", axisIndex: 2, count: width, columns: height, rows: depth,
     columnSpacing: spacingY, rowSpacing: spacingZ,
-    value: (index, row, column) => slices[row][column][index],
+    value: (index, row, column) => inlineSlices[row][column][index],
     masked: (index, row, column) => mask[row][column][index],
     seed: () => { const s = previewSeed(); return s && [s[2], s[0], s[1]]; },
     toSeed: (index, row, column) => [row, column, index],
@@ -72,8 +93,48 @@ Object.entries(planes).forEach(([name, plane]) => {
   canvas.width = Math.max(1, Math.round(physicalWidth * scale));
   canvas.height = Math.max(1, Math.round(physicalHeight * scale));
   const context = canvas.getContext("2d");
+  let loadedIndex = null;
+  let requestController = null;
+
+  function caption(index) {
+    const factor = step[plane.axisIndex];
+    return `(${plane.axis}=${index * factor} / ${(plane.count - 1) * factor})`;
+  }
+
+  function renderFetched(index) {
+    if (loadedIndex === index) {
+      return;
+    }
+    if (requestController) {
+      requestController.abort();
+    }
+    requestController = new AbortController();
+    fetch(`${previewUrl}?plane=${name}&index=${index}`, {signal: requestController.signal})
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Could not load preview slice.");
+        }
+        return response.blob();
+      })
+      .then((blob) => createImageBitmap(blob))
+      .then((bitmap) => {
+        loadedIndex = index;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+        label.textContent = caption(index);
+      })
+      .catch((error) => {
+        if (error.name === "AbortError") return;
+        label.textContent = "Preview unavailable";
+      });
+  }
 
   function render(index) {
+    if (!inlineSlices) {
+      renderFetched(index);
+      return;
+    }
     for (let row = 0; row < plane.rows; row += 1) {
       for (let column = 0; column < plane.columns; column += 1) {
         const value = Math.round(plane.value(index, row, column) * 255);
@@ -93,7 +154,7 @@ Object.entries(planes).forEach(([name, plane]) => {
     sourceContext.putImageData(image, 0, 0);
     context.drawImage(source, 0, 0, canvas.width, canvas.height);
     drawSeed(index);
-    label.textContent = `(${plane.axis}=${index * step[plane.axisIndex]} / ${(plane.count - 1) * step[plane.axisIndex]})`;
+    label.textContent = caption(index);
   }
 
   function drawSeed(index) {
@@ -123,7 +184,13 @@ Object.entries(planes).forEach(([name, plane]) => {
   slider.addEventListener("input", () => render(Number(slider.value)));
   plane.show = show;
 
-  if (pickInput) {
+  document.querySelectorAll(`.slice-step[data-plane="${name}"]`).forEach((button) => {
+    button.addEventListener("click", () => {
+      show(Number(slider.value) + Number(button.dataset.step));
+    });
+  });
+
+  if (pickInput && inlineSlices) {
     canvas.style.cursor = "crosshair";
     canvas.addEventListener("click", (event) => {
       const box = canvas.getBoundingClientRect();

@@ -72,7 +72,7 @@ def test_selected_result_gets_viewer_downloads_and_info(client):
 
     assert response.status_code == 200
     page = response.get_data(as_text=True)
-    assert 'window.meshViewerConfig = {"url": "/meshes/exp_a/mesh.glb"}' in page
+    assert 'data-mesh-url="/meshes/exp_a/mesh.glb"' in page
     assert 'type="module"' in page and "webgl-viewer.js" in page
     for fmt in ("glb", "stl", "obj", "ply"):
         assert f'href="/meshes/exp_a/mesh.{fmt}?download=1"' in page
@@ -148,7 +148,7 @@ def test_building_a_mesh_from_a_nifti_mask(results, client):
     mesh_id = location.split("id=")[1]
     assert (results / mesh_id / "mesh.glb").is_file()
     page = client.get(location).get_data(as_text=True)
-    assert f'"url": "/meshes/{mesh_id}/mesh.glb"' in page
+    assert f'data-mesh-url="/meshes/{mesh_id}/mesh.glb"' in page
     # radii (z, y, x) = (8, 12, 12) voxels with 3 mm slices: size (x, y, z) = (24, 24, 48) mm
     mesh = trimesh.load(results / mesh_id / "mesh.glb", force="mesh")
     np.testing.assert_allclose(mesh.extents, [24, 24, 48], atol=3)

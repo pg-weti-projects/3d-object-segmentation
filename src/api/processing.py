@@ -13,22 +13,28 @@ from src.core import (
 )
 
 
-ALLOWED_EXTENSIONS = {".dcm", ".json", ".tif", ".tiff"}
+ALLOWED_EXTENSIONS = {".dcm", ".json", ".tif", ".tiff", ".nii"}
 
 
 def process_uploads(uploads: list[FileStorage], form) -> dict:
     """Load uploaded files, preprocess the volume, and return view data."""
-    suffixes = {Path(file.filename).suffix.lower() for file in uploads}
+    suffixes = {
+        Path(file.filename).suffix.lower()
+        for file in uploads
+    }
     if not suffixes.issubset(ALLOWED_EXTENSIONS):
-        raise ValueError("Supported files are .dcm, .json, .tif, and .tiff.")
+        raise ValueError("Supported files are .dcm, .json, .nii, .tif, and .tiff.")
 
     config = preprocessing_config(form)
     with tempfile.TemporaryDirectory() as directory:
         directory = Path(directory)
         volume = _load_uploaded_volume(uploads, suffixes, directory)
-        processed = preprocess(volume, config)
+        return process_volume(volume, form)
 
-    return {
+
+def process_volume(volume, form, *, include_slices: bool = True) -> dict:
+    processed = preprocess(volume, preprocessing_config(form))
+    result = {
         "input_shape": volume.shape,
         "output_shape": processed.shape,
         "input_spacing": volume.spacing_mm,
@@ -38,8 +44,12 @@ def process_uploads(uploads: list[FileStorage], form) -> dict:
         "source_hash": processed.source_hash,
         "minimum": float(processed.data.min()),
         "maximum": float(processed.data.max()),
-        "slices": slices_for_preview(processed.data),
     }
+    if include_slices:
+        result["slices"] = slices_for_preview(processed.data)
+    else:
+        result["_preview_data"] = processed.data
+    return result
 
 
 def preprocessing_config(form) -> PreprocessingConfig:

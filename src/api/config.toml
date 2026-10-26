@@ -3,3 +3,4 @@ debug = true
 host = "127.0.0.1"
 port = 5000
 max_form_parts = 5000
+raw_data_dir = "data/raw"

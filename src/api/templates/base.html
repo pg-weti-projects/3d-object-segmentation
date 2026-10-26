@@ -12,12 +12,13 @@
     <div class="container">
       <a class="navbar-brand" href="{{ url_for('web.index') }}">3D Segmentation</a>
       <div class="navbar-nav">
-        <a class="nav-link" href="{{ url_for('web.preprocess_page') }}">Volume Preprocessing</a>
+        <a class="nav-link{% if request.endpoint in ('web.preprocess_page', 'web.datasets_page') %} active{% endif %}" href="{{ url_for('web.preprocess_page') }}">Raw Data Preprocessing</a>
         <a class="nav-link" href="{{ url_for('web.segment_page') }}">Segmentation</a>
         <a class="nav-link{% if request.endpoint == 'web.viewer_page' %} active{% endif %}" href="{{ url_for('web.viewer_page') }}">3D Viewer</a>
       </div>
     </div>
   </nav>
+  <div id="dataset-load-status" class="alert alert-info rounded-0 mb-0 d-none" role="status"></div>
   {% block content %}{% endblock %}
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
   {% block scripts %}{% endblock %}

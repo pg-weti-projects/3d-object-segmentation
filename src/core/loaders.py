@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import logging
 from pathlib import Path
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pydicom
 import tifffile
+import nibabel as nib
 
 from .volume import Volume, hash_bytes
 
@@ -25,7 +26,7 @@ class VolumeLoadError(ValueError):
 
 
 def load_volume(path: str | Path, format: str | None = None) -> Volume:
-    """Load a DICOM, TIFF, or voxel JSON file.
+    """Load a DICOM, TIFF, NIfTI, or voxel JSON file.
 
     A directory is treated as a DICOM series.  JSON accepts either an object
     with a ``data`` or ``voxels`` member, or a raw nested array.
@@ -44,6 +45,8 @@ def load_volume(path: str | Path, format: str | None = None) -> Volume:
         return load_tiff(source)
     if kind in {"voxels-json", "json", "voxels"}:
         return load_json(source)
+    if kind in {"nifti", "nii", "nii.gz"}:
+        return load_nifti(source)
     raise UnsupportedFormatError(f"Unsupported volume format: {kind}")
 
 
@@ -56,6 +59,20 @@ def load_json(path: str | Path) -> Volume:
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
         raise VolumeLoadError(f"Invalid voxel JSON: {source}") from exc
     return Volume(data, spacing, units, "voxels-json", hash_bytes(source.read_bytes()))
+
+
+def load_nifti(path: str | Path) -> Volume:
+    source = Path(path)
+    try:
+        image = nib.load(source)
+        data = np.asanyarray(image.dataobj)
+        if data.ndim != 3 or not np.issubdtype(data.dtype, np.number):
+            raise ValueError("NIfTI volume must be a numeric 3D array")
+        spacing = tuple(float(value) for value in image.header.get_zooms()[:3])[::-1]
+        data = np.asarray(data, dtype=np.float32).transpose(2, 1, 0)
+    except (OSError, ValueError, TypeError) as exc:
+        raise VolumeLoadError(f"Invalid NIfTI volume: {source}") from exc
+    return Volume(data, spacing, "HU", "nifti", hash_bytes(source.read_bytes()))
 
 
 def _json_volume_fields(payload: Any) -> tuple[Any, tuple[float, float, float], str]:
@@ -110,7 +127,7 @@ def load_tiff_series(paths: list[str | Path]) -> Volume:
         if any(array.shape[0] != 1 for array in arrays):
             raise ValueError("TIFF series files must contain 2D slices")
         data = np.concatenate(arrays, axis=0)
-        digest = hash_bytes(b"".join(path.read_bytes() for path in files))
+        digest = _hash_files(files)
     except (OSError, ValueError) as exc:
         raise VolumeLoadError("Invalid TIFF series") from exc
     return Volume(data, (1.0, 1.0, 1.0), "HU", "tiff", digest)
@@ -119,7 +136,7 @@ def load_tiff_series(paths: list[str | Path]) -> Volume:
 def load_dicom(path: str | Path) -> Volume:
     source = Path(path)
     try:
-        dataset = pydicom.dcmread(source)
+        dataset = pydicom.dcmread(source, force=True)
         data = _as_volume_array(_dicom_pixels(dataset))
         spacing = _dicom_spacing(dataset)
     except (OSError, AttributeError, ValueError, TypeError) as exc:
@@ -139,25 +156,39 @@ def load_dicom_series(directory: str | Path) -> Volume:
     if not files:
         files = [item for item in source.iterdir() if item.is_file()]
     try:
-        headers = []
-        for file in files:
-            header = pydicom.dcmread(file, stop_before_pixels=True)
-            if hasattr(header, "Rows") and hasattr(header, "Columns"):
-                headers.append((file, header))
-        if not headers:
+        with ThreadPoolExecutor(max_workers=min(8, len(files) or 1)) as executor:
+            headers = list(executor.map(_read_dicom_header, files))
+        slices = [
+            (file, header)
+            for file, header in zip(files, headers)
+            if hasattr(header, "Rows") and hasattr(header, "Columns")
+        ]
+        if not slices:
             raise ValueError("directory contains no DICOM pixel data")
-        headers.sort(key=lambda item: _slice_position(item[1]))
-        spacing = _series_spacing([header for _, header in headers])
-        first = headers[0][1]
-        data = np.empty((len(headers), int(first.Rows), int(first.Columns)), dtype=np.float32)
-        digest = hashlib.sha256()
-        for index, (file, _header) in enumerate(headers):
-            content = file.read_bytes()
-            digest.update(content)  # the same bytes, in the same order, as before
-            data[index] = _dicom_pixels(pydicom.dcmread(io.BytesIO(content)))
+        slices.sort(key=lambda item: _slice_position(item[1]))
+        spacing = _series_spacing([header for _, header in slices])
+        first = slices[0][1]
+        data = np.empty((len(slices), int(first.Rows), int(first.Columns)), dtype=np.float32)
+
+        def fill(task: tuple[int, Path]) -> None:
+            index, file = task
+            data[index] = _dicom_pixels(_read_dicom(file))
+
+        with ThreadPoolExecutor(max_workers=min(8, len(slices))) as executor:
+            list(executor.map(fill, enumerate(file for file, _ in slices)))
+        digest = _hash_files([file for file, _ in slices])
     except (OSError, AttributeError, ValueError, TypeError) as exc:
         raise VolumeLoadError(f"Invalid DICOM series: {source}") from exc
-    return Volume(data, spacing, "HU", "dicom", digest.hexdigest())
+    return Volume(data, spacing, "HU", "dicom", digest)
+
+
+def _read_dicom(path: Path) -> Any:
+    return pydicom.dcmread(path, force=True)
+
+
+def _read_dicom_header(path: Path) -> Any:
+    """Everything but the pixels, which is all that ordering and geometry need."""
+    return pydicom.dcmread(path, stop_before_pixels=True, force=True)
 
 
 def _dicom_pixels(dataset: Any) -> np.ndarray:
@@ -246,13 +277,27 @@ def _spacing_from_units(value: Any, units: str) -> tuple[float, float, float]:
 
 def _format_from_suffix(path: Path) -> str:
     suffix = path.suffix.lower()
+    if path.name.lower().endswith(".nii.gz"):
+        return "nifti"
     if suffix == ".json":
         return "voxels-json"
+    if suffix == ".nii":
+        return "nifti"
     if suffix in {".tif", ".tiff"}:
         return "tiff"
     if suffix == ".dcm":
         return "dicom"
     raise UnsupportedFormatError(f"Unsupported input suffix: {suffix or '<none>'}")
+
+
+def _hash_files(files: list[Path]) -> str:
+    """Hash a series incrementally without joining all files in memory."""
+    digest = hashlib.sha256()
+    for path in files:
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _natural_path_key(path: Path) -> tuple[int, str]:

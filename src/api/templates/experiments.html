@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Experiments{% endblock %}
+
+{% block content %}
+<main class="container py-4">
+  <div class="mb-4">
+    <h1 class="fw-bold">Experiments</h1>
+    <p class="text-secondary mb-0">
+      Every run the experiment runner left in <code>results/</code>: what it segmented, how well it
+      agreed with the reference mask and how long it took.
+    </p>
+  </div>
+
+  {% if not runs %}
+  <div class="alert alert-info" role="alert">
+    No runs yet. Produce one with
+    <code>python -m src.pipeline.runner configs/experiments/&lt;experiment&gt;.yaml</code>
+    and reload this page.
+  </div>
+  {% else %}
+
+  <section class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <h2 class="h5 mb-0">Comparison</h2>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Metric">
+          {% for key, label in chartable %}
+          <a class="btn btn-outline-primary{% if key == metric %} active{% endif %}"
+             href="{{ url_for('web.experiments_page', metric=key) }}">{{ label }}</a>
+          {% endfor %}
+        </div>
+      </div>
+      {% if chart %}
+      <p class="small text-secondary">
+        {{ metric_label }} per run, {% if lower_is_better %}lower{% else %}higher{% endif %} is better.
+      </p>
+      {{ chart | safe }}
+      {% else %}
+      <p class="text-secondary mb-0">
+        No run has {{ metric_label }} yet - a reference mask is needed to compute it.
+      </p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card border-0 shadow-sm">
+    <div class="card-body">
+      <h2 class="h5">All runs <span class="text-secondary small">({{ runs | length }})</span></h2>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle small">
+          <thead>
+            <tr>
+              <th scope="col">Experiment</th>
+              <th scope="col">Scan</th>
+              <th scope="col">Method</th>
+              {% for key, label, kind, better in columns %}
+              <th scope="col" class="text-end text-nowrap">{{ label }}</th>
+              {% endfor %}
+              <th scope="col">Box</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in runs %}
+            <tr>
+              <th scope="row" class="fw-normal">
+                <div class="d-flex align-items-center gap-2">
+                  <span>{{ run.id }}</span>
+                  {% if run.meshes %}
+                  <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('web.viewer_page', id=run.id) }}"
+                     title="Open the mesh in the 3D viewer">3D</a>
+                  {% endif %}
+                </div>
+                <div class="text-secondary small">
+                  {{ run.modified.strftime("%Y-%m-%d %H:%M") }}{% if run.repetitions %} &middot; {{ run.repetitions }} repetitions{% endif %}
+                </div>
+              </th>
+              <td>{{ run.dataset }}</td>
+              <td><code>{{ run.algorithm }}</code></td>
+              {% for key, label, kind, better in columns %}
+              <td class="text-end text-nowrap">{{ format_value(run.metrics[key], kind) }}</td>
+              {% endfor %}
+              <td>{% if run.box_prompted %}<span class="badge text-bg-secondary">box</span>{% else %}-{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="small text-secondary mb-0">
+        A run without numbers had no <code>data.reference_mask_path</code> in its config, so there was
+        nothing to compare its mask with.
+      </p>
+    </div>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}

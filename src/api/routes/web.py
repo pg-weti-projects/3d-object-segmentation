@@ -19,6 +19,7 @@ from ..meshes import (
     mesh_bytes,
     mesh_info,
 )
+from ..experiments import page_context
 from ..processing import process_uploads
 from ..datasets import (
     DatasetError,
@@ -244,6 +245,12 @@ def process_preview(job_id: str):
     except (KeyError, ValueError):
         abort(404)
     return Response(data, mimetype="image/png", headers={"Cache-Control": "no-store"})
+
+
+@web.get("/experiments")
+def experiments_page():
+    """Metrics of every run in results/, with a comparison chart."""
+    return render_template("experiments.html", **page_context(_results_dir(), request.args.get("metric")))
 
 
 @web.get("/viewer")

@@ -63,3 +63,21 @@ body {
   text-align: center;
   pointer-events: none;
 }
+
+.metric-chart {
+  display: block;
+  max-width: 100%;
+  font-size: 13px;
+}
+
+.metric-chart-bar {
+  fill: var(--bs-primary, #0d6efd);
+}
+
+.metric-chart-label {
+  fill: var(--bs-body-color, #212529);
+}
+
+.metric-chart-value {
+  fill: var(--bs-secondary-color, #6c757d);
+}

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import logging
 from pathlib import Path
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
@@ -12,6 +13,8 @@ import tifffile
 import nibabel as nib
 
 from .volume import Volume, hash_bytes
+
+logger = logging.getLogger(__name__)
 
 
 class UnsupportedFormatError(ValueError):
@@ -142,23 +145,38 @@ def load_dicom(path: str | Path) -> Volume:
 
 
 def load_dicom_series(directory: str | Path) -> Volume:
+    """A folder of DICOM slices as one volume, ordered by slice position.
+
+    The slices are read one at a time into the output array: a long series (the
+    tuna body at 1 mm is 918 slices of 512x512) does not fit in memory three
+    times over, which is what keeping every parsed slice, every converted slice
+    and the stack of them all at once amounted to."""
     source = Path(directory)
     files = sorted(source.glob("*.dcm"))
     if not files:
         files = [item for item in source.iterdir() if item.is_file()]
     try:
         with ThreadPoolExecutor(max_workers=min(8, len(files) or 1)) as executor:
-            loaded = executor.map(_read_dicom, files)
-            datasets = list(zip(files, loaded))
-        datasets = [(file, ds) for file, ds in datasets if hasattr(ds, "PixelData")]
-        if not datasets:
+            headers = list(executor.map(_read_dicom_header, files))
+        slices = [
+            (file, header)
+            for file, header in zip(files, headers)
+            if hasattr(header, "Rows") and hasattr(header, "Columns")
+        ]
+        if not slices:
             raise ValueError("directory contains no DICOM pixel data")
-        datasets.sort(key=lambda item: _slice_position(item[1]))
-        arrays = [_dicom_pixels(ds) for _, ds in datasets]
-        first = datasets[0][1]
-        data = np.stack(arrays, axis=0)
-        spacing = _dicom_spacing(first)
-        digest = _hash_files([file for file, _ in datasets])
+        slices.sort(key=lambda item: _slice_position(item[1]))
+        spacing = _series_spacing([header for _, header in slices])
+        first = slices[0][1]
+        data = np.empty((len(slices), int(first.Rows), int(first.Columns)), dtype=np.float32)
+
+        def fill(task: tuple[int, Path]) -> None:
+            index, file = task
+            data[index] = _dicom_pixels(_read_dicom(file))
+
+        with ThreadPoolExecutor(max_workers=min(8, len(slices))) as executor:
+            list(executor.map(fill, enumerate(file for file, _ in slices)))
+        digest = _hash_files([file for file, _ in slices])
     except (OSError, AttributeError, ValueError, TypeError) as exc:
         raise VolumeLoadError(f"Invalid DICOM series: {source}") from exc
     return Volume(data, spacing, "HU", "dicom", digest)
@@ -166,6 +184,11 @@ def load_dicom_series(directory: str | Path) -> Volume:
 
 def _read_dicom(path: Path) -> Any:
     return pydicom.dcmread(path, force=True)
+
+
+def _read_dicom_header(path: Path) -> Any:
+    """Everything but the pixels, which is all that ordering and geometry need."""
+    return pydicom.dcmread(path, stop_before_pixels=True, force=True)
 
 
 def _dicom_pixels(dataset: Any) -> np.ndarray:
@@ -182,6 +205,41 @@ def _dicom_spacing(dataset: Any) -> tuple[float, float, float]:
     pixel_spacing = tuple(float(value) for value in getattr(dataset, "PixelSpacing", (1, 1)))
     thickness = float(getattr(dataset, "SpacingBetweenSlices", getattr(dataset, "SliceThickness", 1)))
     return (thickness, pixel_spacing[0], pixel_spacing[1])
+
+
+def _series_spacing(datasets: list[Any]) -> tuple[float, float, float]:
+    """Spacing of a series, with the distance between slices taken from where the
+    slices actually are (``ImagePositionPatient``) rather than from how thick they
+    are. The two differ whenever slices overlap: the Bluefin tuna body series is
+    reconstructed every 3.5 mm from 7 mm slices, and reading the thickness made
+    the volume twice as long as its own reference mask.
+
+    ``SpacingBetweenSlices``, when the scanner wrote it, is the same distance; it
+    stays as the fallback for a series whose slice positions are missing."""
+    first = datasets[0]
+    pixel_spacing = tuple(float(value) for value in getattr(first, "PixelSpacing", (1, 1)))
+    positions = []
+    for dataset in datasets:
+        position = getattr(dataset, "ImagePositionPatient", None)
+        if position is None or len(position) != 3:
+            positions = []
+            break
+        positions.append(float(position[2]))
+    if len(positions) > 1:
+        gaps = np.diff(np.sort(np.asarray(positions, dtype=float)))
+        step = float(np.median(gaps))
+        if np.isfinite(step) and step > 0:
+            if not np.allclose(gaps, step, rtol=0.01, atol=1e-6):
+                logger.warning(
+                    "DICOM series: the slices are not evenly spaced (%.4g to %.4g mm apart, using the "
+                    "median %.4g mm); some slices may be missing, and distances along z are then only "
+                    "approximate",
+                    float(gaps.min()),
+                    float(gaps.max()),
+                    step,
+                )
+            return (step, pixel_spacing[0], pixel_spacing[1])
+    return _dicom_spacing(first)
 
 
 def _slice_position(dataset: Any) -> float:

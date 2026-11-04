@@ -7,7 +7,7 @@ reconstruction kernel, the noise and - when a mask already exists - how well the
 annotated structure stands out from the tissue around it.
 
 Usage:
-    python scripts/compare_series.py data/raw/DD2210_Blue_Tuna/DD2210_dicom \\
+    python scripts/compare_series.py data/raw/DD2210_Blue_Tuna \\
         --mask data/reference_masks/DD2210_Bluefin_Tuna/Segmentation.nii.gz
 """
 from __future__ import annotations

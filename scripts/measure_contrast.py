@@ -52,7 +52,7 @@ CASES: dict[str, dict] = {
     # (596-1513 mm) from the same origin, which is what makes that valid.
     "tuna_1mm": {
         "kind": "dicom",
-        "path": "data/raw/DD2210_Blue_Tuna/DD2210_dicom/04_CUERPO_CUERPO_2_0",
+        "path": "data/raw/DD2210_Blue_Tuna/04_CUERPO_CUERPO_2_0",
         "mask_nii": "data/reference_masks/DD2210_Bluefin_Tuna/Segmentation.nii.gz",
         "box_from_mask": 0.25,
     },
@@ -61,7 +61,7 @@ CASES: dict[str, dict] = {
     # of the mask, grown by 25%.
     "tuna": {
         "kind": "dicom",
-        "path": "data/raw/DD2210_Blue_Tuna/DD2210_dicom/02_CUERPO_CUERPO_7_0",
+        "path": "data/raw/DD2210_Blue_Tuna/02_CUERPO_CUERPO_7_0",
         "mask_nii": "data/reference_masks/DD2210_Bluefin_Tuna/Segmentation.nii.gz",
         "box_from_mask": 0.25,
     },

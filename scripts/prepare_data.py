@@ -189,9 +189,14 @@ def unpack_dicom_dump(archive: Path, target: Path, wanted: Callable[[int], bool]
     return counts
 
 
+def slice_z(header: Any) -> float | None:
+    position = getattr(header, "ImagePositionPatient", None)
+    return None if position is None else float(position[2])
+
+
 def dicom_orientation(headers: list[Any]) -> dict[str, Any]:
-    """Where the slices are, in the order the loader puts them (ascending z). `headers`
-    must be in that order."""
+    """Where the slices are, in the order the loader puts them (along the slice normal).
+    `headers` must be in that order."""
     first = headers[0]
     orientation = getattr(first, "ImageOrientationPatient", None)
     normal = None
@@ -203,10 +208,10 @@ def dicom_orientation(headers: list[Any]) -> dict[str, Any]:
         "image_orientation_patient": [float(v) for v in orientation] if orientation is not None else None,
         "slice_normal": normal,
         "patient_position": str(getattr(first, "PatientPosition", "") or ""),
-        "loader_slice_order": "ascending ImagePositionPatient z",
-        "z_of_first_loaded_slice": _slice_position(first),
-        "z_of_last_loaded_slice": _slice_position(headers[-1]),
-        "z_of_first_instance": _slice_position(by_instance),
+        "loader_slice_order": "along the slice normal (row x column direction)",
+        "z_of_first_loaded_slice": slice_z(first),
+        "z_of_last_loaded_slice": slice_z(headers[-1]),
+        "z_of_first_instance": slice_z(by_instance),
     }
 
 

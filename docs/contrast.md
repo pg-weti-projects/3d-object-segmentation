@@ -45,116 +45,89 @@ two - roughly what a user would draw by hand)
 |---|---|---|---|---|
 | Oreo (box of `check_oreo_box.yaml`) | yes | 0.88 | infinite (the gas is uniform) | `high` |
 | Gadus Morhua (box around the reference mask, 2x downsampled) | no | 0.09 | 6.0 | `low` |
-| Bluefin tuna (box around the reference mask, body series at 3.5 mm) | 16% of the mask | 0.00 | -1.1 | `none` |
-| Bluefin tuna (the same body at 1 mm, 918 slices) | 16% of the mask | 0.00 | -1.0 | `none` |
+| Bluefin tuna (box around the reference mask, body series at 3.5 mm) | 6% of the mask | 0.01 | 0.4 | `none` |
+| Bluefin tuna (the same body at 1 mm, 918 slices) | 7% of the mask | 1.00 | - | `high`, not meaningful (see below) |
 
 ### The Bluefin tuna scan
 
-The tuna is `none` for a reason that is worth stating plainly: **what its
-reference mask outlines is as dense as the tissue around it.** In a box around
-that mask, the seed region sits at 23 HU and the tissue at 18 HU, so the
-"bladder" is in fact 5 HU *brighter* - there is nothing for any intensity-based
-method to separate. Inside the mask the median is 17 HU, the 95th percentile
-326 HU, and only 16% of it is gas (below -300 HU); the mask is 402 mL while the
-enclosed gas pockets are tens of millilitres.
+**A correction.** Until the loader ordered slices along the slice normal, this
+series was loaded mirrored in z against its reference masks, so earlier versions
+of this page measured the wrong part of the fish. Their conclusions - that the
+mask was as dense as the tissue around it, and that its boundary was not an edge -
+do not hold. Everything below is measured on the corrected alignment, and claims
+that were not measured again have been removed.
 
-The mask was drawn by hand from anatomy, which a density threshold cannot
-reproduce. Methods that start from the contrast therefore return an empty mask
-and say why, instead of a shape they cannot justify; the best any of them does
-from a seed ball is Dice 0.29, by filling the box with soft tissue.
+**The bladder is brighter than the tissue around it, not darker**, and that is why
+the regime reads `none`: these methods look for a darker region. Two annotations
+of the organ exist, agreeing at Dice 0.864. On the 3.5 mm series:
 
-**The 1 mm series gives the same answer, and an upper bound.** The same body is
-in the dump at 1 mm as well (918 slices, `04_CUERPO_CUERPO_2_0`, the same z range
-from the same origin), so the mask can be resampled onto it and measured again:
-the seed region is 22.4 HU against 16.2 HU of tissue, still the wrong way round,
-still `none`. Of the 402 mL of that mask, 63 mL is gas (below -300 HU), so **a
-method that found every gas voxel inside the mask and nothing else would reach
-Dice 0.271** - that is the ceiling for any density-based method on this
-annotation. For comparison, the box holds 1792 mL of gas in total, almost all of
-it the air around the fish, connected into one component that overlaps the mask
-by Dice 0.06.
+| mask | volume | median | in a shell around it | 75th / 95th percentile | gas (below -300 HU) |
+|---|---|---|---|---|---|
+| `Segmentation` | 402.5 mL | 131 HU | 19 HU | 493 / 3285 HU | 6.3%, 25.5 mL |
+| `Series_3_segmentation` | 320.6 mL | 70 HU | 64 HU | 289 / 925 HU | 7.5%, 24.0 mL |
 
-**The mask is where it should be, though.** The obvious suspicion - that it is
-misaligned - was checked and does not hold. It lines up with the volume grid
-without any permutation, and against a body mask (everything above -300 HU,
-largest component, holes filled) it sits:
+The estimate itself needs care on this scan. With the seed at the centroid of
+`Segmentation` it finds -10.7 HU against 15.0 HU of tissue, `none`. In the box of
+`Series_3_segmentation`, and at 1 mm in both, it reports separability 1.00 and
+`high`. That is an artefact, not a finding: the Otsu split takes a very dense
+structure as the tissue (a tissue level of about 4700-4900 HU).
 
-| | |
-|---|---|
-| inside the body | 84.3% (63 mL outside) |
-| inside the body's silhouette (per-slice convex hull, which closes channels) | 98.4% (6.3 mL outside, in 48 scattered parts, largest 5.8 mL) |
-| HU of the part "outside the body" | -960, i.e. air |
+**The gas does not explain the mask.** A method that found every gas voxel inside
+the mask and nothing else would reach Dice 0.119 (`Segmentation`) or 0.139
+(`Series_3_segmentation`), and 0.124 or 0.145 at 1 mm. The box holds 1005 mL of gas
+in total, nearly all of it the air around the fish, at Dice 0.036 with the mask.
 
-So the 63 mL is not the mask poking out of the fish: it is gas *within* the
-fish's outline that is connected to the air outside, which is why a filled body
-mask excludes it and why `use_hull` deliberately refuses to follow it. In a dead,
-processed fish that is what a bladder open to the outside looks like.
+**The mask is inside the fish.** Of `Segmentation`, 99.9% lies inside the body (everything
+above -300 HU, largest component, slices filled). Of its 25.5 mL of gas, 25.0 mL is
+enclosed, in 12 parts, and 0.5 mL connects to the air outside.
 
-What is left is a mask of 403 mL, correctly placed, of which about 340 mL has the
-density of soft tissue and 63 mL is gas open to the outside. Whether that means a
-collapsed bladder filled with fluid, or an outline of the whole organ including
-its wall and contents, is a question for whoever drew it - not something a
-segmentation parameter can settle.
+**The boundary is an edge.** The in-plane gradient by signed distance from the
+boundary, in mm (negative is inside), on the 3.5 mm series:
 
-**Nor can it be tuned.** Parameters decide which image feature a method
-follows, so before calling the tuna hopeless, the three features a method could
-possibly follow were measured at the boundary of its reference mask. None of them
-is there (`scripts/` has no case for this; the numbers come from a one-off probe
-on the 3.5 mm series, box of the mask grown by 25%):
+| mask | -20..-10 | -10..-4 | -4..0 | 0..4 | 4..10 | 10..20 |
+|---|---|---|---|---|---|---|
+| `Segmentation` | 240 | 539 | **1170** | **633** | 110 | 77 |
+| `Series_3_segmentation` | 106 | 238 | **727** | **972** | 409 | 123 |
 
-| feature | at the mask boundary | control |
-|---|---|---|
-| gradient magnitude (is a bladder wall visible?) | 3.0 | 5.3 inside the mask, 3.2 just outside, 2.3 on a surface shifted by 12 voxels |
-| enclosed gas to grow or inflate from | 3.1 mL in 8 parts, Dice 0.001 (its convex hull: 0.001) | of the 63 mL of gas-density voxels in the mask, nearly all are connected to the air outside the fish |
-| local standard deviation in 5 mm (texture) | 13.0 inside the mask | 7.6 just outside; thresholding it gives at best 974 mL at Dice 0.170 |
+And on the 1 mm series, where slices are 2 mm thick instead of 7 mm:
 
-The boundary of this mask is not an edge, is not a gas border, and is not a
-texture border - the gradient on it is *lower* than inside the mask and no higher
-than on an arbitrary surface 12 voxels away. There is no setting of
-`threshold_fraction`, `balloon`, `gac_alpha` or seed radius that makes a method
-follow something the image does not contain. What the mask does have is more
-structure *inside* it than around it, which is consistent with a hand-drawn
-outline of an organ whose wall this scan does not resolve.
+| mask | on the boundary | 2-6 mm inside | 2-6 mm outside | 15 mm outside | boundary in the top 10% of gradient |
+|---|---|---|---|---|---|
+| `Segmentation` | 1615 | 1001 | 192 | 93 | 63% (5% at 15 mm) |
+| `Series_3_segmentation` | 1287 | 448 | 766 | 115 | 59% (6% at 15 mm) |
 
-If the annotation is the whole organ rather than its gas space, the thing to
-follow would be the bladder wall - so that was measured too, on both series, as
-the in-plane gradient (the wall is thin, and a 7 mm slice averages it away):
+So the outline is visible at both resolutions. The tables also hint at how the two
+masks differ: past the boundary of `Segmentation` the gradient falls away, while past
+that of `Series_3_segmentation` it stays high, as if one includes a dense layer and
+the other stops inside it (see "What the three masks actually outline").
 
-| series | on the mask boundary | inside | just outside | a surface 15 voxels away |
-|---|---|---|---|---|
-| 3.5 mm | 96.5 | 244.5 | 104.1 | 68.0 |
-| 1 mm | 118.3 | 114.3 | 130.8 | 93.0 |
+**An intensity rule has something to follow, in the other direction.** A single
+threshold keeping what is *brighter* reaches Dice 0.494 on `Segmentation` and 0.395
+on `Series_3_segmentation`, against 0.123 and 0.122 for one keeping what is darker.
+That is a ceiling for one threshold, not a result of any method here.
 
-At 1 mm, where slices are 2 mm thick instead of 7 mm, the boundary is
-indistinguishable from the tissue on either side of it, and only 22% of it falls
-in the top 10% of the gradient, against 17% for an arbitrary surface nearby. A
-visible wall would put that share at 60-90%. So the organ's outline is not in
-this scan either, at either resolution.
+It is worth stating in the report which of the three masks outlines what. The way
+forward is to ask what each annotation outlined, and from which series: series 02
+and 03 share the grid of the masks, and which one they were drawn on is not
+established.
 
-That matters beyond the tuna: if the tuna mask is an organ outline and the Oreo
-mask is a gas space (there the bladder is gas at density 1 and a threshold alone
-reaches Dice 0.95), the two datasets do not define the same target, and a single
-Dice column across species compares two different tasks. It is worth stating in
-the report which of the three masks outlines what.
-
-The honest ways forward are therefore not parameters: ask what the annotation
-outlined (and from which series), or give the problem to a model that carries a
-shape prior rather than an intensity rule - which is what the learned methods in
-the runner's table are for.
-
-Three things had to be fixed before any of this could be measured, and all three
+Four things had to be fixed before any of this could be measured, and all four
 are worth knowing:
 
 * the scan arrives as a flat dump of 2430 files with no extension and seven
   series mixed together; `scripts/to_dicom_folders.py` splits it into one folder
-  per series (the body series `02_CUERPO_CUERPO_7_0`, 263 slices, is the one the
-  reference mask belongs to, and `04_CUERPO_CUERPO_2_0` has the same body at
-  918 slices of 1 mm);
+  per series (the body series `02_CUERPO_CUERPO_7_0`, 263 slices, is on the grid of
+  the reference masks, as is the bone series `03_HUESO_HUESO_7_0`, and
+  `04_CUERPO_CUERPO_2_0` has the same body at 918 slices of 1 mm);
 * its slices overlap - 7 mm thick, reconstructed every 3.5 mm - and the loader
   read the thickness, which made the volume twice as long as its own reference
   mask and sent earlier attempts looking for a permutation of the axes that does
   not exist. With the distance taken from the slice positions, the volume is
-  (263, 512, 512) at 3.5 mm and the mask lines up with it directly;
+  (263, 512, 512) at 3.5 mm, the grid of the masks;
+* its slice normal points to -z, and the loader sorted by ascending z, which left
+  the series mirrored against its masks. Slices are now ordered along the normal,
+  and the runner warns when a mask looks mirrored against its scan (`alignment` in
+  `metrics.json`);
 * loading the 1 mm series ran out of memory: every slice was parsed and kept,
   then converted into a second list, then stacked into a third copy, and the
   whole series was read again as bytes to hash it. The slices now go one at a
@@ -180,12 +153,11 @@ box, with the whole annotation against a shell of tissue around it:
 |---|---|---|---|
 | Oreo | the gas space (its 5th to 95th percentile is pure gas) | +0.886 | yes, it is exactly that region |
 | Gadus | a fluid-filled organ, no gas | +0.075 | yes, but only just |
-| Bluefin tuna | an organ of which 12% is gas | +0.002 | no - only the gas part is |
+| Bluefin tuna | an organ, about 6-8% gas, denser than the tissue around it | not measured again | no - on median it is brighter |
 
-So on the tuna the methods are not "focusing on gas instead of the organ" by
-mistake: the organ is not a darker region at all, and the only darker thing
-inside it is its remaining gas. That is a property of the scan, not a choice we
-made.
+So on the tuna the methods look for something the target is not: on median the organ
+is brighter than the tissue around it, not darker. That is a property of the scan,
+not a choice we made.
 
 **How far the data can be pushed.** `scripts/threshold_ceiling.py` sweeps a
 single intensity threshold over the whole range, under the same restriction to
@@ -196,15 +168,18 @@ ceiling for this whole family of methods:
 |---|---|---|---|---|
 | Oreo | 0.882 | high | 0.940 | **0.949** |
 | Gadus | 0.088 | low | 0.663 | 0.643 |
-| Bluefin tuna | 0.000 | none | 0.200 | 0.163 |
+| Bluefin tuna | 0.013 | none | 0.123 | 0.100 |
 
-On every dataset the method is within a few points of the best any threshold
-could do, and on Oreo it is at it. The spread between 0.95, 0.64 and 0.16 is
-therefore not a story about the method working on one fish and failing on
-another - it is the spread of how much of each annotated target an intensity
-rule can see at all. Reporting the ceiling next to the Dice keeps that honest:
-0.163 out of a possible 0.200 says something quite different from 0.163 on its
-own.
+On Oreo and Gadus the method is within a few points of the best any threshold could
+do, and on Oreo it is at it. The spread between 0.95, 0.64 and 0.10 is therefore not
+a story about the method working on one fish and failing on another - it is the
+spread of how much of each annotated target a rule looking for a darker region can
+see at all. Reporting the ceiling next to the Dice keeps that honest: 0.100 out of a
+possible 0.123 says something quite different from 0.100 on its own.
+
+The script sweeps only darker thresholds, and for the tuna that is the wrong
+direction (see above). For `Series_3_segmentation` its restriction to the body also
+collapses onto the dense structure, so its figure there is not meaningful.
 
 ## What the three masks actually outline
 
@@ -216,40 +191,23 @@ units (density in kg/m3, raw TIFF values, HU):
 |---|---|---|---|---|---|
 | Oreo | 31.2 mL | 1 / 1 / 1 (pure gas) | 0.1% | 4 | 0 |
 | Gadus Morhua | 2.4 mL | 18263 / 18513 / 19090 (one soft-tissue band) | 1.3% | 1 | 0 |
-| Bluefin tuna | 402.5 mL | -983 / 17 / 326 (air to bone) | **8.0% = 32 mL** | 1 | 0 |
+| Bluefin tuna | 402.5 mL | -491 / 131 / 3285 | **44.5% = 179 mL** | 1 | 0 |
 
 The first two are homogeneous: the Oreo mask is the gas space and nothing else,
 the Gadus mask is a narrow band of soft tissue with no gas in it. Both look like
 a careful outline of one structure.
 
-The tuna mask is not. It spans the full range of the scan, from air at -983 HU to
-bone at +326 HU, and 8% of it (32 mL) is denser than 99% of the whole scan. Of
-that, 19.7 mL is a single connected blob of bone density on slices 107-139 - a
-swim bladder contains no bone, so that part is an error under any definition of
-the target. Shrinking the mask does not reach a cleaner core either: eroded by
-12 mm it is down to 21 mL and still 44% muscle density.
+The tuna mask is not homogeneous either way: 44.5% of it (179 mL) is denser than
+99% of the whole scan, and the largest such part, 176 mL, runs through all of its
+slices. Most of what is above 1000 HU in the box is one structure of 59 mL, median
+2190 HU, with almost the extent of the bladder (301 x 93 x 99 mm). It lies 91.5%
+inside `Segmentation` and 21.6% inside `Series_3_segmentation`.
 
-Two candidates for review were derived and left in `results/tuna_mask_review/`
-(the reference itself is untouched): the mask without the bone blob (374 mL) and
-the gas inside the mask (44.7 mL). Running the methods against them settles what
-is wrong and what is not:
-
-| target | best Dice | what it means |
-|---|---|---|
-| the reference, 402.5 mL | empty mask | the bladder at the seed is denser than the tissue |
-| without the bone, 374 mL | 0.301 (GrowCut) | removing the bone changes nothing; 125 mL of muscle density remains |
-| the gas only, 44.7 mL | 0.736 (GrowCut) | **circular** - that target was made with the same threshold the method uses |
-
-The last row is not a result and must not be reported as one; it only shows that
-the pipeline works on this scan once the target is something the image contains.
-
-So the conclusion is narrower than "the tuna mask is wrong" and sharper than "the
-tuna is hard": **the tuna annotation cannot be verified or reproduced from its
-own scan, and it contains 20 mL of a structure that is certainly not bladder.**
-Whether the rest of it is a collapsed, fluid-filled bladder drawn from anatomy or
-an outline that took in the surrounding tissue is a question for whoever drew it.
-Until that is answered, the tuna does not belong in a results table next to the
-other two, because its target is not of the same kind.
+So the conclusion is narrower than any single sentence about "the tuna mask": **the
+annotations fit their scan once it is loaded in the right order, and the gradient
+peaks on their boundaries, but what the dense structure is, and whether it belongs
+to the target, is not established.** That is a question for whoever drew them, and
+until it is answered the tuna's target is not of the same kind as the other two.
 
 ## What it changes for each method
 
@@ -279,17 +237,17 @@ method; Dice against the reference mask)
 
 | method | Oreo, seed ball | Oreo, contrast | Gadus, seed ball | Gadus, contrast | Tuna, seed ball | Tuna, contrast |
 |---|---|---|---|---|---|---|
-| `box_region` | - | **0.949** | - | 0.628 | - | empty |
-| Chan-Vese | 0.085 | 0.939 | 0.233 | 0.494 | 0.087 | empty |
+| `box_region` | - | **0.949** | - | 0.628 | - | 0.100 |
+| Chan-Vese | 0.085 | 0.939 | 0.233 | 0.494 | 0.217 | 0.095 |
 | Geodesic active contour | 0.180 | 0.772 | 0.210 | **0.727** | not run | not run |
-| GrowCut | 0.585 | 0.851 | 0.597 | 0.586 | 0.288 | empty |
+| GrowCut | 0.585 | 0.851 | 0.597 | 0.586 | 0.485 | 0.101 |
 
-"empty" is the honest answer on the tuna, as explained above - and no method can
-do better than Dice 0.271 there anyway. The geodesic method was not run on it
-because at 0.839 mm isotropic the box is 10.8 million voxels, which the
-development machine will not finish in reasonable time.
+The tuna columns use the `Segmentation` mask with the seed at its centroid. The
+contrast starts now return large masks with low Dice rather than empty ones. The
+geodesic method did not finish in 600 s on the tuna's 110 x 144 x 161 box on the
+development machine, so it is reported as not run.
 
-The tuna case is in the scripts as `tuna` (the 3.5 mm series the mask belongs to)
+The tuna case is in the scripts as `tuna` (the 3.5 mm series on the grid of the masks)
 and `tuna_1mm` (the same body at 1 mm, with the mask resampled onto it);
 `compare_methods.py` skips `tuna_1mm` unless it is asked for by name, because of
 its size.

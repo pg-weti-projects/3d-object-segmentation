@@ -197,24 +197,24 @@ def test_tuna_can_keep_every_series(tuna_originals, tmp_path):
 
 def test_a_mirrored_mask_is_reported_and_not_corrected(tuna_originals, tmp_path, capsys):
     raw, masks_root = tmp_path / "raw", tmp_path / "masks"
-    affine = [[0, -0.5, 0, 0], [-0.5, 0, 0, 0], [0, 0, -3.5, 100.0], [0, 0, 0, 1]]  # k = 0 at the top
+    affine = [[0.5, 0, 0, 0], [0, 0.5, 0, 0], [0, 0, 3.5, 93.0], [0, 0, 0, 1]]  # k = 0 at the bottom
     write_mask(masks_root, P.TUNA_MASKS[0], (SIZE, SIZE, 3), affine)
     P.prepare_tuna(tuna_originals, raw, masks_root=masks_root, series=(BODY,))
     entry = manifest(raw)[f"{P.TUNA_DATASET}/02_BODY_7_0"]
     assert entry["reference_masks"][0]["mirrored_in_z_against_loaded_series"] is True
     assert any("mirrored in z" in warning for warning in entry["warnings"])
     assert "mirrored in z" in capsys.readouterr().err
-    assert entry["orientation"]["z_of_first_loaded_slice"] == 93.0
+    assert entry["orientation"]["z_of_first_loaded_slice"] == 100.0
     assert entry["orientation"]["z_of_first_instance"] == 100.0
     assert entry["orientation"]["slice_normal"] == [0.0, 0.0, -1.0]
-    # The pixels stay in the order the loader has always given: ascending z.
+    # The series keeps the loader's order: nothing here moves the pixels to suit the mask.
     volume = load_volume(raw / P.TUNA_DATASET / "02_BODY_7_0")
-    assert volume.data[:, 0, 0].tolist() == [2.0, 1.0, 0.0]
+    assert volume.data[:, 0, 0].tolist() == [0.0, 1.0, 2.0]
 
 
 def test_a_mask_in_the_same_order_is_not_called_mirrored(tuna_originals, tmp_path):
     raw, masks_root = tmp_path / "raw", tmp_path / "masks"
-    affine = [[0.5, 0, 0, 0], [0, 0.5, 0, 0], [0, 0, 3.5, 93.0], [0, 0, 0, 1]]
+    affine = [[0, -0.5, 0, 0], [-0.5, 0, 0, 0], [0, 0, -3.5, 100.0], [0, 0, 0, 1]]  # k = 0 at the top, like the tuna
     write_mask(masks_root, P.TUNA_MASKS[0], (SIZE, SIZE, 3), affine)
     P.prepare_tuna(tuna_originals, raw, masks_root=masks_root, series=(BODY,))
     entry = manifest(raw)[f"{P.TUNA_DATASET}/02_BODY_7_0"]

@@ -17,6 +17,7 @@ from src.core.loaders import load_volume
 from src.core.preprocessor import PreprocessingConfig, preprocess
 from src.core.box import crop_volume, restore_mask
 from src.core.volume import Volume
+from src.pipeline.alignment import OK as ALIGNED, check_alignment
 from src.pipeline.experiment import (
     ExperimentConfig,
     load_experiment_config,
@@ -177,6 +178,10 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
         result.metrics = compute_metrics(mask, on_grid, volume.spacing_mm)
         result.metrics["box_prompted"] = result.box_prompted
         result.metrics["runtime_s"] = float(np.median(runtimes))
+        result.metrics["alignment"] = check_alignment(volume.data, on_grid, volume.spacing_mm)
+        if result.metrics["alignment"]["status"] != ALIGNED:
+            result.warnings.append(result.metrics["alignment"]["message"])
+            logger.warning(result.warnings[-1])
         write_metrics_json(result.metrics, result_dir / "metrics.json")
         logger.info("dice %.3f, hd95 %s mm", result.metrics["dice"], result.metrics["hd95_mm"])
 

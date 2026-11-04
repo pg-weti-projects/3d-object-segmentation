@@ -204,8 +204,8 @@ to trust the result at all:
 | `growcut`                 | 0.585           | 0.851          | 0.597            | 0.586           |
 
 Dice against the reference mask, same box and same seed point for every method.
-On the Bluefin tuna every method returns an empty mask with `init_from: contrast`,
-because what its reference mask outlines is as dense as the tissue around it.
+On the Bluefin tuna the bladder is brighter than the tissue around it, which these
+methods do not look for, and contrast starts reach at most Dice 0.10.
 See [docs/contrast.md](docs/contrast.md) for how the contrast is measured, what
 it changes for each method, and how to reproduce the table:
 
@@ -236,8 +236,9 @@ folder per series. `--dry-run` prints what the dump holds:
 | `06_HUESO_HUESO_2_0`   | HUESO HUESO 2.0   | 918    | 512x512 | 2 mm      | 1 mm   |
 
 (plus two scout/report series and one reformat). `CUERPO` is the body kernel and
-`HUESO` the bone kernel; the reference mask belongs to `02_CUERPO_CUERPO_7_0`,
-and `04_CUERPO_CUERPO_2_0` is the same body at 1 mm, covering the same z range
+`HUESO` the bone kernel; the reference masks share the grid of `02_CUERPO_CUERPO_7_0`
+and `03_HUESO_HUESO_7_0` (which one they were drawn on is not established), and
+`04_CUERPO_CUERPO_2_0` is the same body at 1 mm, covering the same z range
 from the same origin.
 
 Note that these slices overlap: 7 mm thick, reconstructed every 3.5 mm. The
@@ -259,7 +260,8 @@ python -m src.pipeline.runner configs/experiments/check_oreo_box.yaml
 The algorithm runs `experiment.repetitions` times from the same seed, and the
 runner reports the run times and whether the repetitions agreed. When the
 spacing of the reference mask differs from the prediction, the reference is
-resampled onto the grid of the prediction before the metrics are computed.
+resampled onto the grid of the prediction before the metrics are computed. It also
+warns when the reference looks mirrored against the scan (`alignment` in `metrics.json`).
 
 ## Mesh reconstruction
 

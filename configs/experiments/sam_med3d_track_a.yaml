@@ -1,0 +1,25 @@
+experiment:
+  id: "sam_med3d_track_a"
+  description: "SAM-Med3D, track A: one click, cube centred on it at 1.5 mm as trained, no box"
+  repetitions: 1
+
+data:
+  input_path: "data/raw/DD2210_Blue_Tuna/02_CUERPO_CUERPO_7_0"
+  reference_mask_path: "data/reference_masks/DD2210_Bluefin_Tuna/Series_3_segmentation.nii.gz"
+  format: "dicom"
+  # the deepest voxel of the mask; no box here, because cube: click refuses one
+  seed_zyx: [84, 206, 285]
+
+algorithm:
+  name: "sam_med3d"
+  parameters:
+    cube: "click"
+    spacing_mm: 1.5
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

@@ -117,7 +117,8 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
 
     where = None
     model_input = volume
-    if config.data.box is not None:
+    handles_box = getattr(segment, "handles_box", False)  # sees the whole scan and uses the box itself
+    if config.data.box is not None and not handles_box:
         model_input, where = crop_volume(volume, config.data.box)
         logger.info(
             "box: the algorithm sees %s of %s voxels (%.1f%%)",
@@ -127,6 +128,8 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
         )
 
     parameters = dict(config.algorithm.parameters)
+    if config.data.box is not None and handles_box:
+        parameters["box"] = config.data.box.to_mapping()
     if config.data.seed_zyx is not None and "seed_zyx" not in parameters:
         offset = [w.start for w in where] if where else [0, 0, 0]
         local_seed = tuple(v - o for v, o in zip(config.data.seed_zyx, offset))
@@ -134,12 +137,14 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
             raise RunnerError(f"data.seed_zyx {config.data.seed_zyx} lies outside the volume the algorithm sees")
         parameters["seed_zyx"] = local_seed  # the algorithms take it relative to the volume they receive
 
-    masks, runtimes = [], []
+    masks, runtimes, method_report = [], [], None
     for repetition in range(max(config.experiment.repetitions, 1)):
         _seed(config.experiment.seed)  # every repetition starts from the same seed
         started = time.perf_counter()
-        local_mask = np.asarray(segment(model_input, dict(parameters)))
+        output = segment(model_input, dict(parameters))
         runtimes.append(time.perf_counter() - started)
+        method_report = getattr(output, "report", None)  # a mask may also say what the method did
+        local_mask = np.asarray(output)
         if local_mask.shape != model_input.shape:
             raise RunnerError(
                 f"'{config.algorithm.name}' returned a mask of shape {local_mask.shape}, "
@@ -157,10 +162,15 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
         result_dir=result_dir,
         mask=mask,
         spacing_mm=volume.spacing_mm,
-        box_prompted=where is not None,
+        box_prompted=config.data.box is not None,
         runtimes_s=runtimes,
         deterministic=deterministic,
     )
+    if method_report:
+        (result_dir / "method_report.json").write_text(json.dumps(method_report, indent=2), encoding="utf-8")
+        for warning in method_report.get("warnings", []):
+            result.warnings.append(warning)
+            logger.warning(warning)
     if not deterministic:
         result.warnings.append("repetitions gave different masks")
         logger.warning(result.warnings[-1])
@@ -182,6 +192,17 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
         if result.metrics["alignment"]["status"] != ALIGNED:
             result.warnings.append(result.metrics["alignment"]["message"])
             logger.warning(result.warnings[-1])
+        if method_report:
+            result.metrics["method_report"] = method_report
+            if "view_mm" in method_report:
+                share = share_in_view(on_grid, volume.spacing_mm, method_report["view_mm"])
+                result.metrics["reference_share_in_view"] = share
+                if share < 1:
+                    result.warnings.append(
+                        f"{100 * (1 - share):.1f}% of the reference mask lies outside what the method can see, "
+                        f"so Dice cannot exceed {2 * share / (1 + share):.3f}."
+                    )
+                    logger.warning(result.warnings[-1])
         write_metrics_json(result.metrics, result_dir / "metrics.json")
         logger.info("dice %.3f, hd95 %s mm", result.metrics["dice"], result.metrics["hd95_mm"])
 
@@ -209,6 +230,17 @@ def match_grid(
     result = reference[np.ix_(*indices)]
     in_z, in_y, in_x = inside
     return result & in_z[:, None, None] & in_y[None, :, None] & in_x[None, None, :]
+
+
+def share_in_view(reference: np.ndarray, spacing: tuple[float, float, float], view_mm: dict) -> float:
+    """The share of the reference inside the region a method could see. Only for reporting: the
+    reference never reaches the method."""
+    inside = []
+    for size, step, low, high in zip(reference.shape, spacing, view_mm["min_zyx"], view_mm["max_zyx"]):
+        centres = (np.arange(size) + 0.5) * step
+        inside.append((centres >= low) & (centres < high))
+    total = int(np.count_nonzero(reference))
+    return float(np.count_nonzero(reference[np.ix_(*inside)])) / total if total else 1.0
 
 
 def _load_reference(path: str | Path) -> tuple[np.ndarray, tuple[float, float, float]]:

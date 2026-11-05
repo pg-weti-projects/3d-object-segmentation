@@ -34,16 +34,19 @@ def test_the_real_network_gives_a_cube_of_probabilities():
     assert probability.min() >= 0 and probability.max() <= 1
 
 
+BOX = {"min_mm": [15.0, 15.0, 15.0], "max_mm": [129.0, 129.0, 129.0]}
+
+
 def test_the_same_input_gives_the_same_mask():
-    first = segment(scan(), {"cube": "click", "seed_zyx": [24, 24, 24]})
-    second = segment(scan(), {"cube": "click", "seed_zyx": [24, 24, 24]})
+    box = {"min_mm": [12.0, 12.0, 12.0], "max_mm": [132.0, 132.0, 132.0]}  # not BOX: the next test needs a fresh encoder
+    first = segment(scan(), {"box": box, "seed_zyx": [24, 24, 24]})
+    second = segment(scan(), {"box": box, "seed_zyx": [24, 24, 24]})
     assert second.report["encoder_output_reused"] is True
     assert np.array_equal(first, second)
 
 
-def test_a_box_cube_reuses_the_encoder_for_another_click_and_gives_a_valid_mask():
-    box = {"min_mm": [15.0, 15.0, 15.0], "max_mm": [129.0, 129.0, 129.0]}
-    first = segment(scan(), {"cube": "box", "box": box, "seed_zyx": [24, 24, 24]})
-    second = segment(scan(), {"cube": "box", "box": box, "seed_zyx": [20, 26, 22]})
+def test_another_click_in_the_same_box_reuses_the_encoder_and_gives_a_valid_mask():
+    first = segment(scan(), {"box": BOX, "seed_zyx": [24, 24, 24]})
+    second = segment(scan(), {"box": BOX, "seed_zyx": [20, 26, 22]})
     assert first.report["encoder_output_reused"] is False and second.report["encoder_output_reused"] is True
     assert np.asarray(first).shape == (48, 48, 48)

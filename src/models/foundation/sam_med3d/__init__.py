@@ -1,4 +1,4 @@
-"""SAM-Med3D as a segmentation method: one click, one 128^3 cube, no training.
+"""SAM-Med3D as a segmentation method: one click and a box, one 128^3 cube, no training.
 
     cube.py      where the cube goes, sampling and mapping back (no torch)
     assets.py    finding and verifying the upstream source and weights (no torch)

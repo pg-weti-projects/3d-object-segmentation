@@ -9,8 +9,7 @@ The trust checks of the SAM-Med3D wrapper on upstream's human CT (amos_0013), on
 
 Procedures, each organ, each click from `test_clicks`:
 
-    track_a          one click, cube centred on it at 1.5 mm
-    track_b          one click, cube scaled to the organ's box grown 25%
+    track_b          one click, cube scaled to the organ's box grown 25% (the method)
     mask_centred     cube centred on the organ at 1.5 mm, as upstream's validation does. It uses the
                      mask to place the cube, so it is a reference point for this control, not a track
 
@@ -61,7 +60,7 @@ CLICKS_PER_ORGAN = 3
 GROW = 0.25
 OUT = Path("results/sam_med3d_checks/control")
 PREPARE = {"clamp": None, "intensity_shift": 0.0, "padding": 0.0}
-PROCEDURES = ("track_a", "track_b", "mask_centred")
+PROCEDURES = ("track_b", "mask_centred")
 
 
 def test_clicks(mask: np.ndarray, spacing, count: int, seed: int = 42) -> list[tuple[int, int, int]]:
@@ -200,15 +199,10 @@ def run(out: Path) -> int:
     canonical = Volume(np.ascontiguousarray(volume.data[:, :, ::-1]), spacing, volume.units, volume.source_format, volume.source_hash)
     any_organ = labels != 0
     body = ndi.binary_fill_holes(volume.data > -300)
-    air_labels, _ = ndi.label(volume.data < -500)
-    outside_air = air_labels == 1 + int(np.argmax(np.bincount(air_labels.ravel())[1:]))
-    del air_labels
 
     def predict(procedure, organ_mask, click, box):
-        if procedure == "track_a":
-            result = segment(volume, {"cube": "click", "seed_zyx": list(click)})
-        elif procedure == "track_b":
-            result = segment(volume, {"cube": "box", "box": box, "seed_zyx": list(click)})
+        if procedure == "track_b":
+            result = segment(volume, {"box": box, "seed_zyx": list(click)})
         else:
             mask, cube, used = run_mask_centred(volume, organ_mask, click)
             report = {"view_mm": {"min_zyx": list(cube.bounds_mm()[0]), "max_zyx": list(cube.bounds_mm()[1])}, "spacing_mm": 1.5, "click_used": list(used)}
@@ -248,7 +242,7 @@ def run(out: Path) -> int:
                     title = f"{name} | {procedure} | deepest click | Dice {row['dice']:.3f}"
                     shown = tuple(report.get("click_used") or click)
                     overlay(volume, prediction, organ_mask, shown, title, cube, out / "overlays" / procedure, f"{organ:02d}_{name}")
-                    if procedure == "track_a":
+                    if procedure == "track_b":
                         row["mirrored"] = {
                             axis: score(prediction, np.flip(organ_mask, position), spacing)["dice"]
                             for position, axis in enumerate("zyx")
@@ -269,12 +263,14 @@ def run(out: Path) -> int:
             prediction, *_ = run_mask_centred(canonical, mirrored, (click[0], click[1], organ_mask.shape[2] - 1 - click[2]))
             results.add({"key": key, "procedure": "mask_centred_canonical", "organ": organ, "name": name, "click_index": 0, **score(prediction, mirrored, spacing)})
 
-        # clicks outside the target, track A: in other tissue nearby, and in the air around the body
+        # clicks outside the target but inside the organ's box, so the cube is the same: other tissue, and air
         rng = np.random.default_rng(42 + organ)
         distance = ndi.distance_transform_edt(~organ_mask, sampling=spacing)
+        in_box = np.zeros(labels.shape, bool)
+        in_box[tuple(slice(int(np.floor(a / s)), int(np.ceil(b / s))) for a, b, s in zip(box["min_mm"], box["max_mm"], spacing))] = True
         candidates = {
-            "negative_outside_near": (distance >= 20) & (distance <= 40) & body & ~any_organ & (volume.data > -300),
-            "negative_outside_air": outside_air & (distance >= 20) & (distance <= 60),
+            "negative_outside_near": in_box & (distance >= 5) & body & ~any_organ & (volume.data > -300),
+            "negative_outside_air": in_box & (distance >= 5) & (volume.data < -500),
         }
         for procedure, where in candidates.items():
             key = f"{procedure}/{organ}/0"
@@ -285,7 +281,7 @@ def run(out: Path) -> int:
                 results.add({"key": key, "procedure": procedure, "organ": organ, "name": name, "click_index": 0, "dice": None, "note": "no such voxel"})
                 continue
             click = tuple(int(v) for v in found[rng.integers(len(found))])
-            prediction, report, cube = predict("track_a", organ_mask, click, None)
+            prediction, report, cube = predict("track_b", organ_mask, click, box)
             row = {
                 "key": key, "procedure": procedure, "organ": organ, "name": name, "click_index": 0, "click_zyx": list(click),
                 "click_hu": float(volume.data[click]), "voxels": int(prediction.sum()), **score(prediction, organ_mask, spacing),
@@ -318,7 +314,7 @@ def summary(out: Path) -> int:
         report[procedure] = {"median_of_organs": median_of_organs(procedure), "median_hd95": median_of_organs(procedure, "hd95_mm"), "min": min(dice), "median": float(np.median(dice)), "max": max(dice), "runs": len(dice)}
         print(f"{procedure:26s}{report[procedure]['median_of_organs']:8.3f}{'':24s}{report[procedure]['median_hd95'] or float('nan'):8.1f}{'':8s}{min(dice):.3f} / {np.median(dice):.3f} / {max(dice):.3f}  ({len(dice)} runs)")
 
-    print("\norgan            track A, 3 clicks     track B, 3 clicks     mask-centred, 3 clicks   mm spacing B  in cube A")
+    print("\norgan            track B, 3 clicks     mask-centred, 3 clicks   mm spacing B")
     per_organ = {}
     for organ, name in ORGANS.items():
         cells = []
@@ -326,15 +322,14 @@ def summary(out: Path) -> int:
             values = [row["dice"] for row in sorted(rows, key=lambda r: r["click_index"]) if row["procedure"] == procedure and row["organ"] == organ]
             cells.append(values)
         spacing = next((row["spacing_mm"] for row in rows if row["procedure"] == "track_b" and row["organ"] == organ), float("nan"))
-        share = np.median([row["reference_share_in_view"] for row in rows if row["procedure"] == "track_a" and row["organ"] == organ] or [np.nan])
         per_organ[name] = {procedure: cell for procedure, cell in zip(PROCEDURES, cells)}
-        print(f"{name:16s} " + "   ".join(" ".join(f"{value:.2f}" for value in cell).ljust(19) for cell in cells) + f"   {spacing:6.2f}      {share:.2f}")
+        print(f"{name:16s} " + "   ".join(" ".join(f"{value:.2f}" for value in cell).ljust(19) for cell in cells) + f"   {spacing:6.2f}")
     report["per_organ"] = per_organ
 
-    deepest = {row["organ"]: row for row in rows if row["procedure"] == "track_a" and row["click_index"] == 0 and "mirrored" in row}
+    deepest = {row["organ"]: row for row in rows if row["procedure"] == "track_b" and row["click_index"] == 0 and "mirrored" in row}
     if deepest:
         negative = {
-            "correct_track_a_deepest": [row["dice"] for row in deepest.values()],
+            "correct_track_b_deepest": [row["dice"] for row in deepest.values()],
             "mirrored_z": [row["mirrored"]["z"] for row in deepest.values()],
             "mirrored_y": [row["mirrored"]["y"] for row in deepest.values()],
             "mirrored_x": [row["mirrored"]["x"] for row in deepest.values()],
@@ -360,10 +355,9 @@ def determinism_once(threads: int) -> int:
     click = test_clicks(organ_mask, volume.spacing_mm, 1)[0]
     box = box_of(organ_mask, volume.spacing_mm)
     output = {}
-    for name, parameters in (("track_a", {"cube": "click"}), ("track_b", {"cube": "box", "box": box})):
-        mask = segment(volume, {**parameters, "seed_zyx": list(click), "threads": threads})
-        output[name] = hashlib.sha256(np.packbits(np.asarray(mask)).tobytes()).hexdigest()
-        output[f"{name}_voxels"] = int(np.asarray(mask).sum())
+    mask = segment(volume, {"box": box, "seed_zyx": list(click), "threads": threads})
+    output["track_b"] = hashlib.sha256(np.packbits(np.asarray(mask)).tobytes()).hexdigest()
+    output["track_b_voxels"] = int(np.asarray(mask).sum())
     print(json.dumps(output))
     return 0
 
@@ -375,10 +369,9 @@ def determinism() -> int:
         found = subprocess.run([sys.executable, __file__, "determinism-once", "--threads", str(threads)], capture_output=True, text=True, check=True)
         row = json.loads(found.stdout.strip().splitlines()[-1])
         runs.append({"threads": threads, **row})
-        print(threads, "threads:", row["track_a"][:16], row["track_b"][:16], flush=True)
-    same_threads = {run["track_a"] for run in runs[:3]} | {run["track_b"] for run in runs[:3]}
-    print("identical across fresh processes, same threads:", len(same_threads) == 2)
-    print("identical with 1 thread:", runs[3]["track_a"] == runs[0]["track_a"] and runs[3]["track_b"] == runs[0]["track_b"])
+        print(threads, "threads:", row["track_b"][:16], flush=True)
+    print("identical across fresh processes, same threads:", len({run["track_b"] for run in runs[:3]}) == 1)
+    print("identical with 1 thread:", runs[3]["track_b"] == runs[0]["track_b"])
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "determinism.json").write_text(json.dumps(runs, indent=2), encoding="utf-8")
     return 0

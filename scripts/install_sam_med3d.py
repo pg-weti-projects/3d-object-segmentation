@@ -120,7 +120,8 @@ def confirm() -> None:
     data[16:24, 16:24, 16:24] = 300.0
     volume = Volume(data, (3.0, 3.0, 3.0), "HU", "synthetic", "0" * 64)
     started = time.perf_counter()
-    mask = segment(volume, {"cube": "click", "seed_zyx": [20, 20, 20]})
+    box = {"min_mm": [24.0, 24.0, 24.0], "max_mm": [96.0, 96.0, 96.0]}
+    mask = segment(volume, {"box": box, "seed_zyx": [20, 20, 20]})
     print(f"check: ok, {time.perf_counter() - started:.1f} s, mask of shape {mask.shape}")
 
 

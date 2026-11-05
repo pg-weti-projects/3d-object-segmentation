@@ -1,6 +1,6 @@
 experiment:
   id: "sam_med3d_track_b"
-  description: "SAM-Med3D, track B (our adaptation): one click, cube scaled to fit a box; the box is never a prompt"
+  description: "SAM-Med3D (our adaptation): one click, cube scaled to fit a box; the box is never a prompt"
   repetitions: 1
 
 data:
@@ -16,7 +16,6 @@ data:
 algorithm:
   name: "sam_med3d"
   parameters:
-    cube: "box"
     box_margin: 0.0
 
 mesh:

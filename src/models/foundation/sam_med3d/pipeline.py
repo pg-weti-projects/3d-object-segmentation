@@ -1,11 +1,10 @@
 """
-segment(volume, parameters): one click, one cube, one mask on the volume's grid.
+segment(volume, parameters): one click and a box, one cube, one mask on the volume's grid.
 
-Which cube is an explicit choice, never inferred from whether a box is present:
-
-    cube: click   centred on the click at spacing_mm (default 1.5, as trained). No box allowed.
-    cube: box     scaled so the box fills it, plus box_margin. The box only sets what the
-                  cube covers; it is never a prompt, and the scan is not cropped to it.
+The cube is centred on the box and scaled so that the box (plus box_margin) fills it. The box
+only sets what the cube covers; it is never a prompt, and the scan is not cropped to it.
+A cube centred on the click alone was tried and dropped: on upstream's human CT it failed the
+protocol's control (see the README).
 
 Nothing is post-processed: no component filtering, no sliding window. A target larger than
 the cube is cut off, and the report says so.
@@ -31,16 +30,13 @@ from . import assets, cube as geometry, network
 
 logger = logging.getLogger(__name__)
 
-CLICK, BOX = "click", "box"
 PADDING_MINIMUM = "minimum"
-TRAINED_SPACING_MM = 1.5
+TRAINED_SPACING_MM = 1.5  # reported against, not used: the box sets the spacing
 
 DEFAULT_PARAMETERS: dict[str, Any] = {
-    "cube": None,  # required: "click" or "box"
     "seed_zyx": None,  # required: the click, as a voxel of the volume
-    "box": None,  # {"min_mm": [z, y, x], "max_mm": [z, y, x]}; the runner passes data.box here
-    "spacing_mm": None,  # cube: click only; None = TRAINED_SPACING_MM
-    "box_margin": 0.0,  # cube: box only; share of the box's longest side added to the cube's side
+    "box": None,  # required: {"min_mm": [z, y, x], "max_mm": [z, y, x]}; the runner passes data.box here
+    "box_margin": 0.0,  # share of the box's longest side added to the cube's side
     "padding": 0.0,  # value outside the scan, as upstream, or "minimum" = lowest scan value in the cube
     "threshold": 0.5,  # on the sigmoid, as upstream
     "clamp": None,  # [low, high] applied to the scan first; None = as upstream's validation
@@ -71,27 +67,10 @@ def resolve_parameters(parameters: Mapping[str, Any] | None) -> dict[str, Any]:
         raise ValueError(f"unknown sam_med3d parameters {unknown}; allowed: {sorted(DEFAULT_PARAMETERS)}")
     params = {**DEFAULT_PARAMETERS, **section}
 
-    mode = params["cube"]
-    if mode not in (CLICK, BOX):
-        raise ValueError(f"sam_med3d needs the parameter cube: '{CLICK}' or '{BOX}', got {mode!r}")
-    if mode == CLICK and params["box"] is not None:
-        raise ValueError(
-            f"cube: {CLICK} is centred on the click and takes no box, but a box was given. "
-            f"Remove data.box, or use cube: {BOX}."
-        )
-    if mode == BOX and params["box"] is None:
-        raise ValueError(f"cube: {BOX} needs a box (data.box), and none was given. Add one, or use cube: {CLICK}.")
-    if mode == BOX and params["spacing_mm"] is not None:
-        raise ValueError(f"cube: {BOX} takes its spacing from the box; remove spacing_mm.")
-    if mode == CLICK and params["box_margin"]:
-        raise ValueError(f"box_margin belongs to cube: {BOX}; remove it from cube: {CLICK}.")
-    if mode == CLICK and params["spacing_mm"] is None:
-        params["spacing_mm"] = TRAINED_SPACING_MM
-
+    if params["box"] is None:
+        raise ValueError("sam_med3d needs a box (data.box) around the target, and none was given.")
     if params["seed_zyx"] is None:
         raise ValueError("sam_med3d needs a click: set data.seed_zyx to a voxel inside the target.")
-    if params["spacing_mm"] is not None:
-        _number(params["spacing_mm"], "spacing_mm", above=0)
     _number(params["box_margin"], "box_margin", above=-1)
     _number(params["intensity_shift"], "intensity_shift")
     threshold = _number(params["threshold"], "threshold")
@@ -148,13 +127,9 @@ def segment(volume: Volume, parameters: Mapping[str, Any] | None = None) -> Mask
         raise ValueError(f"seed_zyx={seed} lies outside the volume {tuple(volume.shape)}")
     click_mm = geometry.voxel_centre_mm(seed, spacing)
 
-    box_mm = None
-    if params["cube"] == CLICK:
-        cube = geometry.cube_on_click(click_mm, float(params["spacing_mm"]))
-    else:
-        box = Box.from_mapping(dict(params["box"]))
-        box_mm = (box.min_mm, box.max_mm)
-        cube = geometry.cube_on_box(box.min_mm, box.max_mm, float(params["box_margin"]))
+    box = Box.from_mapping(dict(params["box"]))
+    box_mm = (box.min_mm, box.max_mm)
+    cube = geometry.cube_on_box(box.min_mm, box.max_mm, float(params["box_margin"]))
     click_xyz = geometry.network_click(click_mm, cube)
 
     values, inside = geometry.sample(volume.data, spacing, cube)
@@ -166,7 +141,6 @@ def segment(volume: Volume, parameters: Mapping[str, Any] | None = None) -> Mask
     mask = geometry.paste_back(cube_mask, cube, volume.shape, spacing)
 
     report: dict[str, Any] = {
-        "cube": params["cube"],
         "spacing_mm": cube.spacing_mm,
         "spacing_vs_trained": cube.spacing_mm / TRAINED_SPACING_MM,
         "side_mm": cube.side_mm,
@@ -193,7 +167,7 @@ def _warnings(report: Mapping[str, Any]) -> list[str]:
     if report["faces_reached_inside_scan"]:
         warnings.append(
             f"The mask reaches the cube's {', '.join(report['faces_reached_inside_scan'])} face inside the scan: "
-            f"the target may be cut off at the cube ({report['side_mm']:.0f} mm a side). There is no sliding window."
+            f"the target may be cut off at the cube ({report['side_mm']:.0f} mm a side). Draw the box around the whole target."
         )
     if report["normalisation"]["air_is_above_0"]:
         warnings.append(

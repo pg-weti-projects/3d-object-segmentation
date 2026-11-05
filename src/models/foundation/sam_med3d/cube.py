@@ -14,7 +14,6 @@ from dataclasses import dataclass
 import numpy as np
 
 SIZE = 128  # fixed by the checkpoint: image_encoder.pos_embed is (1, 8, 8, 8, 768), patches of 16
-CENTRE_INDEX = 64  # the voxel upstream clicks when it has no label (infer_utils.py:116)
 
 
 @dataclass(frozen=True)
@@ -36,11 +35,6 @@ class Cube:
 
 def voxel_centre_mm(voxel_zyx, spacing_zyx) -> tuple[float, float, float]:
     return tuple((v + 0.5) * s for v, s in zip(voxel_zyx, spacing_zyx))
-
-
-def cube_on_click(click_mm, spacing_mm: float) -> Cube:
-    """Centred on the click: the click falls on the centre of voxel 64 on every axis."""
-    return Cube(tuple(c - (CENTRE_INDEX + 0.5) * spacing_mm for c in click_mm), float(spacing_mm))
 
 
 def cube_on_box(box_min_mm, box_max_mm, margin: float = 0.0) -> Cube:

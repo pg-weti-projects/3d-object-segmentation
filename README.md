@@ -190,6 +190,11 @@ back on the full grid, so mesh and metrics always work on the whole scan.
 | `geodesic_active_contour` | Geodesic active contour (MorphGAC), 3D                                                  |
 | `growcut`                 | GrowCut cellular automaton, 3D                                                          |
 
+SAM-Med3D (`sam_med3d`) needs the box too. A click-only variant, with the cube
+centred on the click, was tried and dropped: on the human CT shipped with
+SAM-Med3D it reached a median Dice of 0.32 over 15 organs (the best of six
+click-only variants reached 0.39), against the 0.50 required.
+
 Each of the three analytical methods can start either from a small ball around
 the seed point (`init_from: seed_ball`, the default) or from the measured
 contrast between the bladder and the tissue (`init_from: contrast`), which is

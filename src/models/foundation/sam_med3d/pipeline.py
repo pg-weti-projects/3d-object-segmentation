@@ -1,13 +1,15 @@
 """
-segment(volume, parameters): one click and a box, one cube, one mask on the volume's grid.
+segment(volume, parameters): one click on the contents of a box, one cube, one mask on the volume's grid.
 
-The cube is centred on the box and scaled so that the box (plus box_margin) fills it. The box
-only sets what the cube covers; it is never a prompt, and the scan is not cropped to it.
-A cube centred on the click alone was tried and dropped: on upstream's human CT it failed the
-protocol's control (see the README).
+The runner crops the scan to the user's 3D box, as for the other box methods, and passes only
+the box's contents. The cube is centred on them and scaled so that their longest side fills it;
+the shorter sides are padded. Before the scan is shrunk onto a coarser cube it is smoothed, so
+that fine detail does not alias. The box sets only what the cube covers and is never a model
+prompt. A cube centred on the click alone was tried and dropped: on upstream's human CT it
+failed the protocol's control (see the README).
 
-Nothing is post-processed: no component filtering, no sliding window. A target larger than
-the cube is cut off, and the report says so.
+Nothing is post-processed: no component filtering, no sliding window. A target that reaches the
+edge of the box may be cut off, and the report says so.
 
 Upstream's normalisation is a z-score over the voxels above 0, which behaves as in training
 only when air is below 0, as it is in HU. On scans above 0 everywhere it also takes in the
@@ -23,7 +25,6 @@ from typing import Any
 
 import numpy as np
 
-from src.core.box import Box
 from src.core.volume import Volume
 
 from . import assets, cube as geometry, network
@@ -34,10 +35,8 @@ PADDING_MINIMUM = "minimum"
 TRAINED_SPACING_MM = 1.5  # reported against, not used: the box sets the spacing
 
 DEFAULT_PARAMETERS: dict[str, Any] = {
-    "seed_zyx": None,  # required: the click, as a voxel of the volume
-    "box": None,  # required: {"min_mm": [z, y, x], "max_mm": [z, y, x]}; the runner passes data.box here
-    "box_margin": 0.0,  # share of the box's longest side added to the cube's side
-    "padding": 0.0,  # value outside the scan, as upstream, or "minimum" = lowest scan value in the cube
+    "seed_zyx": None,  # required: the click, as a voxel of the volume it is given (the box's contents)
+    "padding": 0.0,  # value outside the box, as upstream, or "minimum" = lowest scan value in the cube
     "threshold": 0.5,  # on the sigmoid, as upstream
     "clamp": None,  # [low, high] applied to the scan first; None = as upstream's validation
     "intensity_shift": 0.0,  # added to the scan after the clamp and before the z-score; 0 = as upstream
@@ -67,11 +66,8 @@ def resolve_parameters(parameters: Mapping[str, Any] | None) -> dict[str, Any]:
         raise ValueError(f"unknown sam_med3d parameters {unknown}; allowed: {sorted(DEFAULT_PARAMETERS)}")
     params = {**DEFAULT_PARAMETERS, **section}
 
-    if params["box"] is None:
-        raise ValueError("sam_med3d needs a box (data.box) around the target, and none was given.")
     if params["seed_zyx"] is None:
         raise ValueError("sam_med3d needs a click: set data.seed_zyx to a voxel inside the target.")
-    _number(params["box_margin"], "box_margin", above=-1)
     _number(params["intensity_shift"], "intensity_shift")
     threshold = _number(params["threshold"], "threshold")
     if not 0 < threshold < 1:
@@ -127,12 +123,13 @@ def segment(volume: Volume, parameters: Mapping[str, Any] | None = None) -> Mask
         raise ValueError(f"seed_zyx={seed} lies outside the volume {tuple(volume.shape)}")
     click_mm = geometry.voxel_centre_mm(seed, spacing)
 
-    box = Box.from_mapping(dict(params["box"]))
-    box_mm = (box.min_mm, box.max_mm)
-    cube = geometry.cube_on_box(box.min_mm, box.max_mm, float(params["box_margin"]))
+    extent_mm = tuple(n * s for n, s in zip(volume.shape, spacing))
+    cube = geometry.cube_on_box((0.0, 0.0, 0.0), extent_mm)
     click_xyz = geometry.network_click(click_mm, cube)
 
-    values, inside = geometry.sample(volume.data, spacing, cube)
+    smoothed, sigma = geometry.antialias(volume.data, spacing, cube.spacing_mm)
+    values, inside = geometry.sample(smoothed, spacing, cube)
+    del smoothed
     prepared, normalisation = prepare(values, inside, params)
     net = network.get_network(str(params["device"]), params["threads"])
     embedding = net.embed(geometry.to_network_axes(prepared))
@@ -144,30 +141,42 @@ def segment(volume: Volume, parameters: Mapping[str, Any] | None = None) -> Mask
         "spacing_mm": cube.spacing_mm,
         "spacing_vs_trained": cube.spacing_mm / TRAINED_SPACING_MM,
         "side_mm": cube.side_mm,
+        "box_extent_mm_zyx": list(extent_mm),
+        "smoothing_sigma_voxels_zyx": list(sigma),
         "click_mm_zyx": list(click_mm),
         "click_in_cube_xyz": list(click_xyz),
         "threshold": float(params["threshold"]),
         "post_processing": None,
         "encoder_output_reused": bool(getattr(net, "last_was_cached", False)),
         "normalisation": normalisation,
-        **geometry.coverage(cube, volume.shape, spacing, box_mm),
+        "view_mm": {"min_zyx": [0.0, 0.0, 0.0], "max_zyx": list(extent_mm)},  # all of what it was given
+        "padding_share_of_cube": 1.0 - float(np.prod([e / cube.side_mm for e in extent_mm])),
     }
-    report["faces_reached_inside_scan"] = geometry.faces_touched_inside_scan(cube_mask, cube, volume.shape, spacing)
+    report["box_faces_reached"] = _faces_reached(mask)
     report["warnings"] = _warnings(report)
     return MaskWithReport(mask, report)
 
 
-segment.handles_box = True  # the runner passes data.box as a parameter and does not crop to it
+segment.needs_box = True  # the runner refuses a run without data.box, then crops to it as for the other box methods
+
+
+def _faces_reached(mask: np.ndarray) -> list[str]:
+    """The faces of the volume it was given (the box) that the mask reaches: there the target may go on."""
+    faces = []
+    for axis in range(3):
+        if np.take(mask, 0, axis=axis).any():
+            faces.append("low " + "zyx"[axis])
+        if np.take(mask, mask.shape[axis] - 1, axis=axis).any():
+            faces.append("high " + "zyx"[axis])
+    return faces
 
 
 def _warnings(report: Mapping[str, Any]) -> list[str]:
     warnings = []
-    if report.get("box_share_in_cube", 1.0) < 1.0:
-        warnings.append(f"Only {100 * report['box_share_in_cube']:.1f}% of the box fits in the cube.")
-    if report["faces_reached_inside_scan"]:
+    if report["box_faces_reached"]:
         warnings.append(
-            f"The mask reaches the cube's {', '.join(report['faces_reached_inside_scan'])} face inside the scan: "
-            f"the target may be cut off at the cube ({report['side_mm']:.0f} mm a side). Draw the box around the whole target."
+            f"The mask reaches the box's {', '.join(report['box_faces_reached'])} face: the target may go on "
+            "past the box and be cut off. Draw the box around the whole target."
         )
     if report["normalisation"]["air_is_above_0"]:
         warnings.append(

@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import ndimage as ndi
 
 SIZE = 128  # fixed by the checkpoint: image_encoder.pos_embed is (1, 8, 8, 8, 768), patches of 16
 
@@ -37,12 +38,22 @@ def voxel_centre_mm(voxel_zyx, spacing_zyx) -> tuple[float, float, float]:
     return tuple((v + 0.5) * s for v, s in zip(voxel_zyx, spacing_zyx))
 
 
-def cube_on_box(box_min_mm, box_max_mm, margin: float = 0.0) -> Cube:
-    """Centred on the box, isotropic, with its longest side (plus `margin` of it) filling the cube."""
+def cube_on_box(box_min_mm, box_max_mm) -> Cube:
+    """Centred on the box, isotropic, with its longest side filling the cube."""
     extent = [high - low for low, high in zip(box_min_mm, box_max_mm)]
-    spacing = max(extent) * (1.0 + margin) / SIZE
+    spacing = max(extent) / SIZE
     centre = [(low + high) / 2 for low, high in zip(box_min_mm, box_max_mm)]
     return Cube(tuple(c - SIZE * spacing / 2 for c in centre), float(spacing))
+
+
+def antialias(data: np.ndarray, spacing_zyx, cube_spacing_mm: float) -> tuple[np.ndarray, tuple[float, float, float]]:
+    """The scan smoothed before it is shrunk onto a coarser cube, so that detail finer than the cube's
+    voxels does not alias. A Gaussian of sigma (k - 1) / 2 scan voxels on each axis that is shrunk by
+    k > 1; axes that are not shrunk are left alone. Returns the data and the sigmas used."""
+    sigma = tuple(max(cube_spacing_mm / step - 1.0, 0.0) / 2 for step in spacing_zyx)
+    if not any(sigma):
+        return data, sigma
+    return ndi.gaussian_filter(np.asarray(data, dtype=np.float32), sigma, mode="nearest"), sigma
 
 
 def sample(data: np.ndarray, spacing_zyx, cube: Cube) -> tuple[np.ndarray, np.ndarray]:
@@ -109,44 +120,3 @@ def network_click(click_mm, cube: Cube) -> tuple[int, int, int]:
     if any(not 0 <= v < SIZE for v in voxel):
         raise ValueError(f"The click at {tuple(round(c, 2) for c in click_mm)} mm lies outside the cube")
     return voxel[2], voxel[1], voxel[0]
-
-
-def coverage(cube: Cube, shape, spacing_zyx, box_mm=None) -> dict:
-    """How the cube and the scan (and the box, if any) overlap. Shares are of volume."""
-    low, high = cube.bounds_mm()
-    overlap, extent = [], []
-    for axis, (size, step) in enumerate(zip(shape, spacing_zyx)):
-        extent.append(size * step)
-        overlap.append(max(min(high[axis], extent[axis]) - max(low[axis], 0.0), 0.0))
-    side = cube.side_mm
-    in_scan = min(float(np.prod([o / side for o in overlap])), 1.0)  # rounding can pass 1 by a hair
-    report = {
-        "view_mm": {"min_zyx": list(low), "max_zyx": list(high)},
-        "scan_extent_mm_zyx": extent,
-        "cube_share_in_scan": in_scan,
-        "padding_share_of_cube": 1.0 - in_scan,
-        "scan_share_in_cube": float(np.prod([o / e for o, e in zip(overlap, extent)])),
-        "scan_axes_longer_than_cube": ["zyx"[a] for a in range(3) if extent[a] > side],
-    }
-    if box_mm is not None:
-        box_low, box_high = box_mm
-        size = [b - a for a, b in zip(box_low, box_high)]
-        in_cube = [max(min(b, h) - max(a, l), 0.0) for a, b, l, h in zip(box_low, box_high, low, high)]
-        in_scan = [max(min(b, e) - max(a, 0.0), 0.0) for a, b, e in zip(box_low, box_high, extent)]
-        report["box_share_in_cube"] = float(np.prod([i / s for i, s in zip(in_cube, size)]))
-        report["box_share_in_scan"] = float(np.prod([i / s for i, s in zip(in_scan, size)]))
-    return report
-
-
-def faces_touched_inside_scan(cube_mask: np.ndarray, cube: Cube, shape, spacing_zyx) -> list[str]:
-    """Cube faces the mask reaches where the scan goes on past the face: there the target may be cut off."""
-    low, high = cube.bounds_mm()
-    touched = []
-    for axis, (size, step) in enumerate(zip(shape, spacing_zyx)):
-        first = np.take(cube_mask, 0, axis=axis).any()
-        last = np.take(cube_mask, SIZE - 1, axis=axis).any()
-        if first and low[axis] > 0:
-            touched.append("low " + "zyx"[axis])
-        if last and high[axis] < size * step:
-            touched.append("high " + "zyx"[axis])
-    return touched

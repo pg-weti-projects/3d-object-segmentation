@@ -68,7 +68,6 @@ def test_a_box_fills_the_cube_along_its_longest_side():
     low, high = cube.bounds_mm()
     assert (low[0], high[0]) == (10.0, 266.0)
     assert (low[1] + high[1]) / 2 == 32.0  # centred on the box, on the shorter axes too
-    assert geometry.cube_on_box((0, 0, 0), (128.0, 10.0, 10.0), margin=0.25).spacing_mm == 1.25
 
 
 def test_the_axis_conversion_is_explicit_and_its_own_inverse():
@@ -152,29 +151,16 @@ def test_paste_back_resamples_to_the_scans_grid():
     assert far[:, :, 0].any() and not far[:, :, 399].any()
 
 
-def test_coverage_of_a_small_scan_and_a_long_one():
-    small = geometry.coverage(centred((10.0, 10.0, 10.0), 1.5), (20, 20, 20), (1.0, 1.0, 1.0))
-    assert small["scan_share_in_cube"] == 1.0
-    assert small["cube_share_in_scan"] == pytest.approx((20 / 192) ** 3)
-    assert small["padding_share_of_cube"] == pytest.approx(1 - (20 / 192) ** 3)
-    assert small["scan_axes_longer_than_cube"] == []
-    long = geometry.coverage(centred((500.0, 50.0, 50.0), 1.5), (1000, 100, 100), (1.0, 1.0, 1.0))
-    assert long["scan_share_in_cube"] == pytest.approx(0.192)
-    assert long["scan_axes_longer_than_cube"] == ["z"]
-
-
-def test_a_box_cut_by_the_cube_is_measured():
-    report = geometry.coverage(geometry.Cube((0.0, 0.0, 0.0), 1.0), (500, 500, 500), (1.0, 1.0, 1.0), ((0, 0, 0), (256, 64, 64)))
-    assert report["box_share_in_cube"] == pytest.approx(0.5)
-    assert report["box_share_in_scan"] == 1.0
-
-
-def test_only_faces_with_scan_beyond_them_count_as_cut():
-    cube = centred((50.0, 50.0, 50.0), 1.5)
-    mask = np.zeros((SIZE, SIZE, SIZE), bool)
-    mask[SIZE - 1, 60, 60] = True
-    assert geometry.faces_touched_inside_scan(mask, cube, (1000, 100, 100), (1.0, 1.0, 1.0)) == ["high z"]
-    assert geometry.faces_touched_inside_scan(mask, cube, (100, 100, 100), (1.0, 1.0, 1.0)) == []
+def test_shrinking_smooths_first_and_leaves_axes_that_are_not_shrunk_alone():
+    data = np.zeros((40, 40, 40), np.float32)
+    data[:, :, ::2] = 100.0  # stripes one voxel wide along x: finer than a 4 mm cube can show
+    smoothed, sigma = geometry.antialias(data, (1.0, 1.0, 1.0), 4.0)
+    assert sigma == (1.5, 1.5, 1.5)
+    assert np.ptp(smoothed[20, 20, 10:30]) < 1  # averaged away, not aliased into a false pattern
+    assert smoothed[20, 20, 20] == pytest.approx(50.0, abs=0.5)
+    same, none = geometry.antialias(data, (1.0, 1.0, 1.0), 0.5)
+    assert none == (0.0, 0.0, 0.0) and same is data
+    assert geometry.antialias(data, (5.0, 0.5, 0.5), 1.5)[1] == (0.0, 1.0, 1.0)
 
 
 # --- normalisation -------------------------------------------------------------------------------
@@ -237,64 +223,56 @@ def test_a_flat_or_empty_cube_is_a_clear_error(fill):
 # --- segment -------------------------------------------------------------------------------------
 
 
-BOX_IN_VOLUME = {"min_mm": [40.0, 50.0, 60.0], "max_mm": [80.0, 90.0, 100.0]}  # holds the seed (30, 35, 40) of volume()
+# The runner crops the scan to the box; segment() is given only the box's contents, here volume().
 
 
-def test_a_mask_comes_back_on_the_volumes_grid_around_the_click(fake):
-    scan = volume()
-    mask = segment(scan, {"box": BOX_IN_VOLUME, "seed_zyx": [30, 35, 40]})
+def test_a_mask_comes_back_on_the_grid_of_the_box_it_was_given(fake):
+    scan = volume()  # 120 x 140 x 160 mm
+    mask = segment(scan, {"seed_zyx": [30, 35, 40]})
     assert np.asarray(mask).shape == scan.shape
     assert mask[30, 35, 40] == 1
-    assert mask.report["spacing_mm"] == pytest.approx(40 / 128)
+    assert mask.report["spacing_mm"] == pytest.approx(160 / 128)
+    assert mask.report["view_mm"] == {"min_zyx": [0.0, 0.0, 0.0], "max_zyx": [120.0, 140.0, 160.0]}
     assert mask.report["post_processing"] is None
+    assert mask.report["box_faces_reached"] == []
+    assert not any("cut off" in warning for warning in mask.report["warnings"])
 
 
 def test_axis_order_end_to_end(fake):
     """A bright voxel at a known (z, y, x) reaches the network as (x, y, z), and the click comes back to it."""
-    data = np.full((64, 80, 96), 10.0, np.float32)
+    data = np.full((128, 128, 128), 10.0, np.float32)  # 192 mm at 1.5 mm: cube voxel = scan voxel
     data[20, 30, 40] = 500.0
     scan = Volume(data, (1.5, 1.5, 1.5), "HU", "dicom", "0" * 64)
-    box = {"min_mm": [0.0, 0.0, 0.0], "max_mm": [192.0, 192.0, 192.0]}  # cube voxel = scan voxel
-    mask = segment(scan, {"box": box, "seed_zyx": [20, 30, 40]})
+    mask = segment(scan, {"seed_zyx": [20, 30, 40]})
     assert fake.cubes[0].argmax() == np.ravel_multi_index((40, 30, 20), (SIZE, SIZE, SIZE))
     assert fake.clicks == [(40, 30, 20)]
     assert mask[20, 30, 40] == 1
     data2 = data.copy()
     data2[20, 30, 42] = 900.0  # two voxels along x from the click: axis 0 of the network's cube
-    segment(Volume(data2, (1.5, 1.5, 1.5), "HU", "dicom", "0" * 64), {"box": box, "seed_zyx": [20, 30, 40]})
+    segment(Volume(data2, (1.5, 1.5, 1.5), "HU", "dicom", "0" * 64), {"seed_zyx": [20, 30, 40]})
     assert np.unravel_index(fake.cubes[1].argmax(), (SIZE, SIZE, SIZE)) == (42, 30, 20)
 
 
-def test_the_cube_scales_to_the_box_and_the_whole_scan_stays_visible(fake):
-    scan = volume(shape=(60, 70, 80), spacing=(2.0, 2.0, 2.0))
-    box = {"min_mm": [40.0, 60.0, 70.0], "max_mm": [104.0, 80.0, 80.0]}  # 64 mm longest, 10 mm shortest
-    mask = segment(scan, {"box": box, "seed_zyx": [25, 35, 37]})
-    assert mask.report["spacing_mm"] == 0.5
-    assert mask.report["box_share_in_cube"] == 1.0
-    # not cropped to the box: the cube's other axes reach real scan outside the box, not padding
-    assert mask.report["padding_share_of_cube"] == 0.0
-    assert not np.isclose(fake.cubes[0], fake.cubes[0][0, 0, 0]).all()
-    assert mask[25, 35, 37] == 1
+def test_the_longest_side_fills_the_cube_and_the_shorter_ones_are_padded(fake):
+    report = segment(volume(), {"seed_zyx": [30, 35, 40]}).report  # 120 x 140 x 160 mm
+    assert report["padding_share_of_cube"] == pytest.approx(1 - (120 * 140) / (160 * 160))
+    cube_xyz = fake.cubes[0]
+    # z covers 120 of the cube's 160 mm, centred: 20 mm (16 voxels) of padding at each end, one value
+    assert len(np.unique(cube_xyz[:, :, :16])) == 1 and len(np.unique(cube_xyz[:, :, :17])) > 1
+    assert len(np.unique(cube_xyz[:, :, 20])) > 1
 
 
-def test_a_box_near_the_scans_edge_is_padded_beyond_the_scan_only(fake):
-    box = {"min_mm": [20.0, 20.0, 20.0], "max_mm": [84.0, 40.0, 30.0]}
-    report = segment(volume(), {"box": box, "seed_zyx": [25, 15, 12]}).report
-    assert 0 < report["padding_share_of_cube"] < 0.2
-    assert report["box_share_in_cube"] == 1.0
+def test_a_box_shrunk_onto_the_cube_is_smoothed_first(fake):
+    scan = volume(shape=(40, 200, 200), spacing=(5.0, 1.0, 1.0))  # 200 mm on every axis: a 1.5625 mm cube
+    report = segment(scan, {"seed_zyx": [20, 100, 100]}).report
+    assert report["smoothing_sigma_voxels_zyx"] == [0.0, pytest.approx(0.28125), pytest.approx(0.28125)]
+    assert segment(volume(), {"seed_zyx": [30, 35, 40]}).report["smoothing_sigma_voxels_zyx"] == [0.0, 0.0, 0.0]
 
 
-def test_a_margin_makes_the_cube_coarser(fake):
-    box = {"min_mm": [20.0, 20.0, 20.0], "max_mm": [84.0, 40.0, 30.0]}
-    mask = segment(volume(), {"box": box, "box_margin": 0.5, "seed_zyx": [25, 15, 12]})
-    assert mask.report["spacing_mm"] == 0.75
-
-
-def test_another_click_in_the_same_box_cube_does_not_rerun_the_encoder(fake):
+def test_another_click_in_the_same_box_does_not_rerun_the_encoder(fake):
     scan = volume()
-    box = {"min_mm": [20.0, 20.0, 20.0], "max_mm": [84.0, 40.0, 30.0]}
-    first = segment(scan, {"box": box, "seed_zyx": [25, 15, 12]})
-    second = segment(scan, {"box": box, "seed_zyx": [30, 12, 13]})
+    first = segment(scan, {"seed_zyx": [25, 15, 12]})
+    second = segment(scan, {"seed_zyx": [30, 12, 13]})
     assert len(fake.cubes) == 1
     assert len(fake.clicks) == 2 and fake.clicks[0] != fake.clicks[1]
     assert first.report["encoder_output_reused"] is False and second.report["encoder_output_reused"] is True
@@ -302,51 +280,44 @@ def test_another_click_in_the_same_box_cube_does_not_rerun_the_encoder(fake):
 
 
 def test_a_different_box_runs_the_encoder_again(fake):
-    scan = volume()
-    segment(scan, {"box": {"min_mm": [20.0, 20.0, 20.0], "max_mm": [84.0, 40.0, 30.0]}, "seed_zyx": [25, 15, 12]})
-    segment(scan, {"box": {"min_mm": [10.0, 20.0, 20.0], "max_mm": [84.0, 40.0, 30.0]}, "seed_zyx": [25, 15, 12]})
+    segment(volume(), {"seed_zyx": [25, 15, 12]})
+    segment(volume(shape=(50, 70, 80)), {"seed_zyx": [25, 15, 12]})
     assert len(fake.cubes) == 2
 
 
 def test_the_threshold_is_a_parameter(fake, monkeypatch):
     monkeypatch.setattr(fake, "predict", lambda embedding, click: np.full((SIZE, SIZE, SIZE), 0.6, np.float32))
-    assert segment(volume(), {"box": BOX_IN_VOLUME, "seed_zyx": [30, 35, 40]}).any()
-    assert not segment(volume(), {"box": BOX_IN_VOLUME, "seed_zyx": [30, 35, 40], "threshold": 0.7}).any()
+    assert segment(volume(), {"seed_zyx": [30, 35, 40]}).any()
+    assert not segment(volume(), {"seed_zyx": [30, 35, 40], "threshold": 0.7}).any()
 
 
-def test_a_mask_reaching_the_cube_inside_a_long_scan_warns(fake, monkeypatch):
+def test_a_mask_reaching_the_edge_of_the_box_warns(fake, monkeypatch):
     monkeypatch.setattr(fake, "predict", lambda embedding, click: np.ones((SIZE, SIZE, SIZE), np.float32))
-    box = {"min_mm": [200.0, 0.0, 0.0], "max_mm": [456.0, 80.0, 80.0]}  # 256 mm of an 800 mm scan
-    report = segment(volume(shape=(400, 40, 40), spacing=(2.0, 2.0, 2.0)), {"box": box, "seed_zyx": [200, 20, 20]}).report
-    assert report["faces_reached_inside_scan"] == ["low z", "high z"]
+    report = segment(volume(), {"seed_zyx": [30, 35, 40]}).report
+    assert report["box_faces_reached"] == ["low z", "high z", "low y", "high y", "low x", "high x"]
     assert any("cut off" in warning for warning in report["warnings"])
-    assert report["scan_axes_longer_than_cube"] == ["z"]
-    assert report["scan_share_in_cube"] == pytest.approx(256 / 800)
 
 
 def test_a_scan_above_0_warns(fake):
-    report = segment(volume(), {"box": BOX_IN_VOLUME, "seed_zyx": [30, 35, 40]}).report
+    report = segment(volume(), {"seed_zyx": [30, 35, 40]}).report
     assert report["normalisation"]["air_is_above_0"] is True
     assert any("also takes in the air" in warning for warning in report["warnings"])
-
-
-SMALL_BOX = {"min_mm": [0, 0, 0], "max_mm": [9, 9, 9]}
 
 
 @pytest.mark.parametrize(
     "parameters, message",
     [
-        ({"seed_zyx": [1, 1, 1]}, "needs a box"),
-        ({"box": SMALL_BOX}, "needs a click"),
-        ({"box": SMALL_BOX, "seed_zyx": [999, 1, 1]}, "outside the volume"),
-        ({"box": SMALL_BOX, "seed_zyx": [1, 1, 1], "threshold": 2}, "between 0 and 1"),
-        ({"box": SMALL_BOX, "seed_zyx": [1, 1, 1], "padding": "mean"}, "padding"),
-        ({"box": SMALL_BOX, "seed_zyx": [1, 1, 1], "clamp": [5, 1]}, "low < high"),
-        ({"box": SMALL_BOX, "seed_zyx": [1, 1, 1], "box_margin": -1}, "above -1"),
-        # the closed click-only mode and its spacing are refused like any other unknown name
-        ({"cube": "click", "box": SMALL_BOX, "seed_zyx": [1, 1, 1]}, "unknown sam_med3d parameters"),
-        ({"box": SMALL_BOX, "seed_zyx": [1, 1, 1], "spacing_mm": 1.5}, "unknown sam_med3d parameters"),
-        ({"box": SMALL_BOX, "seed_zyx": [1, 1, 1], "sliding_window": True}, "unknown sam_med3d parameters"),
+        ({}, "needs a click"),
+        ({"seed_zyx": [999, 1, 1]}, "outside the volume"),
+        ({"seed_zyx": [1, 1, 1], "threshold": 2}, "between 0 and 1"),
+        ({"seed_zyx": [1, 1, 1], "padding": "mean"}, "padding"),
+        ({"seed_zyx": [1, 1, 1], "clamp": [5, 1]}, "low < high"),
+        # the runner crops to the box, so the method takes none; closed options are refused like any unknown name
+        ({"seed_zyx": [1, 1, 1], "box": {"min_mm": [0, 0, 0], "max_mm": [9, 9, 9]}}, "unknown sam_med3d parameters"),
+        ({"seed_zyx": [1, 1, 1], "box_margin": 0.25}, "unknown sam_med3d parameters"),
+        ({"seed_zyx": [1, 1, 1], "cube": "click"}, "unknown sam_med3d parameters"),
+        ({"seed_zyx": [1, 1, 1], "spacing_mm": 1.5}, "unknown sam_med3d parameters"),
+        ({"seed_zyx": [1, 1, 1], "sliding_window": True}, "unknown sam_med3d parameters"),
     ],
 )
 def test_wrong_parameters_are_clear_errors(fake, parameters, message):
@@ -449,15 +420,20 @@ def _config(tmp_path, *, box=None, seed=(30, 35, 40), shape=(60, 70, 80), target
 BOX = {"min_mm": [40.0, 40.0, 40.0], "max_mm": [100.0, 100.0, 100.0]}
 
 
-def test_the_runner_runs_with_a_box_without_cropping_to_it(tmp_path, fake):
-    result = run_experiment(_config(tmp_path, box=BOX))
+def test_the_runner_crops_to_the_box_like_the_other_box_methods(tmp_path, fake):
+    result = run_experiment(_config(tmp_path, box=BOX))  # 60 mm a side: voxels 20-49 of each axis
     directory = tmp_path / "results" / "exp"
     for name in ("config.yaml", "mask.nii.gz", "mesh.glb", "metrics.json", "run.log", "method_report.json"):
         assert (directory / name).is_file(), name
     assert result.box_prompted is True
-    assert result.metrics["method_report"]["spacing_mm"] == pytest.approx(60 / 128)
-    assert result.mask[30, 35, 40] == 1  # the seed is in the whole scan's voxels, not the box's
+    report = result.metrics["method_report"]
+    assert report["box_extent_mm_zyx"] == [60.0, 60.0, 60.0]
+    assert report["spacing_mm"] == pytest.approx(60 / 128)
+    assert report["padding_share_of_cube"] == pytest.approx(0.0)
+    assert result.mask[30, 35, 40] == 1  # the seed is given in the scan's voxels; the runner moves it into the box
     assert result.mask.shape == volume().shape
+    assert not result.mask[:20].any() and not result.mask[50:].any()
+    assert result.metrics["reference_share_in_view"] == 1.0
 
 
 def test_the_runner_refuses_a_run_without_a_box(tmp_path, fake, capsys):
@@ -465,8 +441,8 @@ def test_the_runner_refuses_a_run_without_a_box(tmp_path, fake, capsys):
     assert "needs a box" in capsys.readouterr().err
 
 
-def test_the_runner_reports_a_reference_that_does_not_fit_in_the_cube(tmp_path, fake):
-    # the reference is 400 mm long, against a box and cube of 128 mm
+def test_the_runner_reports_a_reference_that_does_not_fit_in_the_box(tmp_path, fake):
+    # the reference is 400 mm long, against a box of 128 mm; the cube's padding beyond the box does not count
     box = {"min_mm": [136.0, 28.0, 28.0], "max_mm": [264.0, 52.0, 52.0]}
     path = _config(tmp_path, box=box, seed=(100, 20, 20), shape=(200, 40, 40), target=(slice(0, 200), slice(15, 25), slice(15, 25)))
     result = run_experiment(path)

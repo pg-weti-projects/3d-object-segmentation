@@ -117,8 +117,9 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
 
     where = None
     model_input = volume
-    handles_box = getattr(segment, "handles_box", False)  # sees the whole scan and uses the box itself
-    if config.data.box is not None and not handles_box:
+    if config.data.box is None and getattr(segment, "needs_box", False):
+        raise RunnerError(f"'{config.algorithm.name}' needs a box (data.box) around the target, and none was given.")
+    if config.data.box is not None:
         model_input, where = crop_volume(volume, config.data.box)
         logger.info(
             "box: the algorithm sees %s of %s voxels (%.1f%%)",
@@ -128,8 +129,6 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
         )
 
     parameters = dict(config.algorithm.parameters)
-    if config.data.box is not None and handles_box:
-        parameters["box"] = config.data.box.to_mapping()
     if config.data.seed_zyx is not None and "seed_zyx" not in parameters:
         offset = [w.start for w in where] if where else [0, 0, 0]
         local_seed = tuple(v - o for v, o in zip(config.data.seed_zyx, offset))
@@ -195,7 +194,8 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
         if method_report:
             result.metrics["method_report"] = method_report
             if "view_mm" in method_report:
-                share = share_in_view(on_grid, volume.spacing_mm, method_report["view_mm"])
+                view = _view_on_scan(method_report["view_mm"], where, volume.spacing_mm)
+                share = share_in_view(on_grid, volume.spacing_mm, view)
                 result.metrics["reference_share_in_view"] = share
                 if share < 1:
                     result.warnings.append(
@@ -230,6 +230,19 @@ def match_grid(
     result = reference[np.ix_(*indices)]
     in_z, in_y, in_x = inside
     return result & in_z[:, None, None] & in_y[None, :, None] & in_x[None, None, :]
+
+
+def _view_on_scan(view_mm: dict, where, spacing: tuple[float, float, float]) -> dict:
+    """A method reports what it saw in the coordinates of the volume it was given. After a crop that
+    is the box: shift it back onto the scan, and keep it inside the box, since nothing else reached it."""
+    if where is None:
+        return view_mm
+    low = [w.start * s for w, s in zip(where, spacing)]
+    high = [w.stop * s for w, s in zip(where, spacing)]
+    return {
+        "min_zyx": [max(v + o, o) for v, o in zip(view_mm["min_zyx"], low)],
+        "max_zyx": [min(v + o, h) for v, o, h in zip(view_mm["max_zyx"], low, high)],
+    }
 
 
 def share_in_view(reference: np.ndarray, spacing: tuple[float, float, float], view_mm: dict) -> float:

@@ -9,7 +9,8 @@ The trust checks of the SAM-Med3D wrapper on upstream's human CT (amos_0013), on
 
 Procedures, each organ, each click from `test_clicks`:
 
-    track_b          one click, cube scaled to the organ's box grown 25% (the method)
+    track_b          the method: the scan cropped to the organ's box grown 25%, one click, the cube
+                     scaled to the box
     mask_centred     cube centred on the organ at 1.5 mm, as upstream's validation does. It uses the
                      mask to place the cube, so it is a reference point for this control, not a track
 
@@ -39,6 +40,7 @@ from scipy import ndimage as ndi  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.measure_contrast import _box_around_mask  # noqa: E402
+from src.core.box import Box, crop_volume, restore_mask  # noqa: E402
 from src.core.loaders import load_volume  # noqa: E402
 from src.core.volume import Volume  # noqa: E402
 from src.models.foundation.sam_med3d import assets, cube as geometry, network, segment  # noqa: E402
@@ -106,6 +108,32 @@ def run_mask_centred(volume: Volume, organ_mask: np.ndarray, click) -> tuple[np.
     click_xyz = geometry.network_click(geometry.voxel_centre_mm(click, volume.spacing_mm), cube)
     probability = geometry.to_network_axes(net.predict(embedding, click_xyz))
     return geometry.paste_back(probability > 0.5, cube, volume.shape, volume.spacing_mm), cube, tuple(click)
+
+
+class Region:
+    """A box in mm, drawn on the overlays like a cube."""
+
+    def __init__(self, low, high) -> None:
+        self.low, self.high = tuple(low), tuple(high)
+
+    def bounds_mm(self):
+        return self.low, self.high
+
+
+def box_slices(volume: Volume, box: dict) -> tuple[slice, slice, slice]:
+    return Box.from_mapping(box).slices(volume.shape, volume.spacing_mm)
+
+
+def run_box(volume: Volume, box: dict, click, **parameters) -> tuple[np.ndarray, dict, Region]:
+    """The method as the runner runs it: crop to the box, click in the box's voxels, paste the mask back."""
+    cropped, where = crop_volume(volume, Box.from_mapping(box))
+    local = [int(c) - w.start for c, w in zip(click, where)]
+    result = segment(cropped, {"seed_zyx": local, **parameters})
+    mask = restore_mask(np.asarray(result), volume.shape, where) != 0
+    low = [w.start * s for w, s in zip(where, volume.spacing_mm)]
+    high = [w.stop * s for w, s in zip(where, volume.spacing_mm)]
+    report = {**result.report, "view_mm": {"min_zyx": low, "max_zyx": high}}
+    return mask, report, Region(low, high)
 
 
 def box_of(mask: np.ndarray, spacing) -> dict:
@@ -202,22 +230,17 @@ def run(out: Path) -> int:
 
     def predict(procedure, organ_mask, click, box):
         if procedure == "track_b":
-            result = segment(volume, {"box": box, "seed_zyx": list(click)})
-        else:
-            mask, cube, used = run_mask_centred(volume, organ_mask, click)
-            report = {"view_mm": {"min_zyx": list(cube.bounds_mm()[0]), "max_zyx": list(cube.bounds_mm()[1])}, "spacing_mm": 1.5, "click_used": list(used)}
-            return mask, report, cube
-        report = result.report
-        low, high = report["view_mm"]["min_zyx"], report["view_mm"]["max_zyx"]
-        spacing_mm = report["spacing_mm"]
-        return np.asarray(result), report, geometry.Cube(tuple(low), spacing_mm)
+            return run_box(volume, box, click)
+        mask, cube, used = run_mask_centred(volume, organ_mask, click)
+        report = {"view_mm": {"min_zyx": list(cube.bounds_mm()[0]), "max_zyx": list(cube.bounds_mm()[1])}, "spacing_mm": 1.5, "click_used": list(used)}
+        return mask, report, cube
 
     for organ, name in ORGANS.items():
         organ_mask = labels == organ
         box = box_of(organ_mask, spacing)
         clicks = test_clicks(organ_mask, spacing, CLICKS_PER_ORGAN)
         fill = np.zeros(labels.shape, bool)
-        fill[tuple(slice(int(np.floor(a / s)), int(np.ceil(b / s))) for a, b, s in zip(box["min_mm"], box["max_mm"], spacing))] = True
+        fill[box_slices(volume, box)] = True  # the same voxels the method is given
         print(f"organ {organ} {name}: clicks {clicks}", flush=True)
 
         for procedure in PROCEDURES:
@@ -234,7 +257,7 @@ def run(out: Path) -> int:
                     "reference_share_in_view": share_in_view(organ_mask, spacing, report["view_mm"]),
                     "padding_share_of_cube": report.get("padding_share_of_cube"),
                     "click_used_zyx": report.get("click_used"),
-                    "faces_reached_inside_scan": report.get("faces_reached_inside_scan"),
+                    "box_faces_reached": report.get("box_faces_reached"),
                     "mask_sha": hashlib.sha256(np.packbits(prediction).tobytes()).hexdigest()[:16],
                     **score(prediction, organ_mask, spacing),
                 }
@@ -267,7 +290,7 @@ def run(out: Path) -> int:
         rng = np.random.default_rng(42 + organ)
         distance = ndi.distance_transform_edt(~organ_mask, sampling=spacing)
         in_box = np.zeros(labels.shape, bool)
-        in_box[tuple(slice(int(np.floor(a / s)), int(np.ceil(b / s))) for a, b, s in zip(box["min_mm"], box["max_mm"], spacing))] = True
+        in_box[box_slices(volume, box)] = True
         candidates = {
             "negative_outside_near": in_box & (distance >= 5) & body & ~any_organ & (volume.data > -300),
             "negative_outside_air": in_box & (distance >= 5) & (volume.data < -500),
@@ -355,9 +378,9 @@ def determinism_once(threads: int) -> int:
     click = test_clicks(organ_mask, volume.spacing_mm, 1)[0]
     box = box_of(organ_mask, volume.spacing_mm)
     output = {}
-    mask = segment(volume, {"box": box, "seed_zyx": list(click), "threads": threads})
-    output["track_b"] = hashlib.sha256(np.packbits(np.asarray(mask)).tobytes()).hexdigest()
-    output["track_b_voxels"] = int(np.asarray(mask).sum())
+    mask, _, _ = run_box(volume, box, click, threads=threads)
+    output["track_b"] = hashlib.sha256(np.packbits(mask).tobytes()).hexdigest()
+    output["track_b_voxels"] = int(mask.sum())
     print(json.dumps(output))
     return 0
 

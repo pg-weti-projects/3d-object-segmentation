@@ -34,19 +34,21 @@ def test_the_real_network_gives_a_cube_of_probabilities():
     assert probability.min() >= 0 and probability.max() <= 1
 
 
-BOX = {"min_mm": [15.0, 15.0, 15.0], "max_mm": [129.0, 129.0, 129.0]}
+def box_contents():
+    """What the runner would pass for a box of voxels 5-42: a different cube from scan()'s."""
+    whole = scan()
+    return Volume(np.ascontiguousarray(whole.data[5:43, 5:43, 5:43]), whole.spacing_mm, "HU", "synthetic", "1" * 64)
 
 
 def test_the_same_input_gives_the_same_mask():
-    box = {"min_mm": [12.0, 12.0, 12.0], "max_mm": [132.0, 132.0, 132.0]}  # not BOX: the next test needs a fresh encoder
-    first = segment(scan(), {"box": box, "seed_zyx": [24, 24, 24]})
-    second = segment(scan(), {"box": box, "seed_zyx": [24, 24, 24]})
+    first = segment(scan(), {"seed_zyx": [24, 24, 24]})
+    second = segment(scan(), {"seed_zyx": [24, 24, 24]})
     assert second.report["encoder_output_reused"] is True
     assert np.array_equal(first, second)
 
 
 def test_another_click_in_the_same_box_reuses_the_encoder_and_gives_a_valid_mask():
-    first = segment(scan(), {"box": BOX, "seed_zyx": [24, 24, 24]})
-    second = segment(scan(), {"box": BOX, "seed_zyx": [20, 26, 22]})
+    first = segment(box_contents(), {"seed_zyx": [19, 19, 19]})
+    second = segment(box_contents(), {"seed_zyx": [15, 21, 17]})
     assert first.report["encoder_output_reused"] is False and second.report["encoder_output_reused"] is True
-    assert np.asarray(first).shape == (48, 48, 48)
+    assert np.asarray(first).shape == (38, 38, 38)

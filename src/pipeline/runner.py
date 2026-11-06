@@ -119,7 +119,14 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
     model_input = volume
     if config.data.box is None and getattr(segment, "needs_box", False):
         raise RunnerError(f"'{config.algorithm.name}' needs a box (data.box) around the target, and none was given.")
-    if config.data.box is not None:
+    parameters = dict(config.algorithm.parameters)
+    takes_scan = getattr(segment, "takes_scan", None)
+    if config.data.box is not None and takes_scan is not None and takes_scan(parameters):
+        # the method looks past the box (SAM-Med3D's context "scan"): it gets the whole scan and the box
+        box_where = config.data.box.slices(volume.shape, volume.spacing_mm)
+        parameters["box_zyx"] = [[w.start, w.stop] for w in box_where]
+        logger.info("box: %s voxels; the method sees the scan around it and keeps its mask inside it", parameters["box_zyx"])
+    elif config.data.box is not None:
         model_input, where = crop_volume(volume, config.data.box)
         logger.info(
             "box: the algorithm sees %s of %s voxels (%.1f%%)",
@@ -128,7 +135,6 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
             100 * model_input.data.size / volume.data.size,
         )
 
-    parameters = dict(config.algorithm.parameters)
     if config.data.seed_zyx is not None and "seed_zyx" not in parameters:
         offset = [w.start for w in where] if where else [0, 0, 0]
         local_seed = tuple(v - o for v, o in zip(config.data.seed_zyx, offset))

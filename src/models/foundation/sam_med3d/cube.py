@@ -38,22 +38,41 @@ def voxel_centre_mm(voxel_zyx, spacing_zyx) -> tuple[float, float, float]:
     return tuple((v + 0.5) * s for v, s in zip(voxel_zyx, spacing_zyx))
 
 
-def cube_on_box(box_min_mm, box_max_mm) -> Cube:
-    """Centred on the box, isotropic, with its longest side filling the cube."""
+def cube_on_box(box_min_mm, box_max_mm, min_spacing_mm: float | None = None) -> Cube:
+    """Centred on the box, isotropic, with its longest side filling the cube; with `min_spacing_mm`,
+    never finer than that (the cube then reaches past the box)."""
     extent = [high - low for low, high in zip(box_min_mm, box_max_mm)]
-    spacing = max(extent) / SIZE
+    spacing = max(max(extent) / SIZE, min_spacing_mm or 0.0)
     centre = [(low + high) / 2 for low, high in zip(box_min_mm, box_max_mm)]
     return Cube(tuple(c - SIZE * spacing / 2 for c in centre), float(spacing))
+
+
+def antialias_sigma(spacing_zyx, cube_spacing_mm: float) -> tuple[float, float, float]:
+    return tuple(max(cube_spacing_mm / step - 1.0, 0.0) / 2 for step in spacing_zyx)
 
 
 def antialias(data: np.ndarray, spacing_zyx, cube_spacing_mm: float) -> tuple[np.ndarray, tuple[float, float, float]]:
     """The scan smoothed before it is shrunk onto a coarser cube, so that detail finer than the cube's
     voxels does not alias. A Gaussian of sigma (k - 1) / 2 scan voxels on each axis that is shrunk by
     k > 1; axes that are not shrunk are left alone. Returns the data and the sigmas used."""
-    sigma = tuple(max(cube_spacing_mm / step - 1.0, 0.0) / 2 for step in spacing_zyx)
+    sigma = antialias_sigma(spacing_zyx, cube_spacing_mm)
     if not any(sigma):
         return data, sigma
     return ndi.gaussian_filter(np.asarray(data, dtype=np.float32), sigma, mode="nearest"), sigma
+
+
+def region_around(cube: Cube, shape, spacing_zyx) -> tuple[slice, slice, slice]:
+    """The scan voxels the cube samples, plus enough for the antialias filter to see real neighbours
+    (scipy's Gaussian reaches 4 sigma), clipped to the scan."""
+    sigma = antialias_sigma(spacing_zyx, cube.spacing_mm)
+    low, high = cube.bounds_mm()
+    region = []
+    for axis, (size, step) in enumerate(zip(shape, spacing_zyx)):
+        margin = int(4 * sigma[axis] + 0.5) + 2
+        start = max(int(np.floor(low[axis] / step)) - margin, 0)
+        stop = min(int(np.ceil(high[axis] / step)) + margin, size)
+        region.append(slice(start, max(stop, start + 1)))
+    return tuple(region)
 
 
 def sample(data: np.ndarray, spacing_zyx, cube: Cube) -> tuple[np.ndarray, np.ndarray]:

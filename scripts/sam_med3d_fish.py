@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.sam_med3d_control import imperfect_boxes, test_clicks  # noqa: E402
 from src.core.box import Box  # noqa: E402
+from src.models.foundation.sam_med3d.pipeline import PADDED_NO_SHIFT  # noqa: E402
 from src.core.loaders import load_volume  # noqa: E402
 from src.pipeline.metrics import dice  # noqa: E402
 from src.pipeline.runner import _load_reference, match_grid  # noqa: E402
@@ -175,6 +176,8 @@ def jobs(plan_data: dict) -> list[dict]:
         settings = fish["settings"]
 
         def add(setting, algorithm, parameters, setting_key="primary", input_path=None, repetitions_on_deepest=1):
+            if algorithm == "sam_med3d":  # the method as this evaluation ran it on 2026-11-05, not today's defaults
+                parameters = {**PADDED_NO_SHIFT, **parameters}
             for index, click in enumerate(settings[setting_key]["clicks"]):
                 result.append({
                     "id": f"{fish_name}__{setting}__click{index}",

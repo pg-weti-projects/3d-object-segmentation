@@ -47,7 +47,7 @@ from src.core.box import Box, crop_volume, restore_mask  # noqa: E402
 from src.core.loaders import load_volume  # noqa: E402
 from src.core.volume import Volume  # noqa: E402
 from src.models.foundation.sam_med3d import assets, cube as geometry, network, segment  # noqa: E402
-from src.models.foundation.sam_med3d.pipeline import prepare  # noqa: E402
+from src.models.foundation.sam_med3d.pipeline import PADDED_NO_SHIFT, prepare  # noqa: E402
 from src.pipeline.metrics import compute_metrics  # noqa: E402
 from src.pipeline.runner import share_in_view  # noqa: E402
 
@@ -132,7 +132,7 @@ def run_box(volume: Volume, box: dict, click, **parameters) -> tuple[np.ndarray,
     """The method as the runner runs it: crop to the box, click in the box's voxels, paste the mask back."""
     cropped, where = crop_volume(volume, Box.from_mapping(box))
     local = [int(c) - w.start for c, w in zip(click, where)]
-    result = segment(cropped, {"seed_zyx": local, **parameters})
+    result = segment(cropped, {"seed_zyx": local, **PADDED_NO_SHIFT, **parameters})  # as the human checks of 2026-11-05 ran it (results/sam_med3d_checks)
     mask = restore_mask(np.asarray(result), volume.shape, where) != 0
     low = [w.start * s for w, s in zip(where, volume.spacing_mm)]
     high = [w.stop * s for w, s in zip(where, volume.spacing_mm)]

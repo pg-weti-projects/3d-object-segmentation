@@ -243,13 +243,13 @@ def test_axis_order_end_to_end(fake):
     data = np.full((128, 128, 128), 10.0, np.float32)  # 192 mm at 1.5 mm: cube voxel = scan voxel
     data[20, 30, 40] = 500.0
     scan = Volume(data, (1.5, 1.5, 1.5), "HU", "dicom", "0" * 64)
-    mask = segment(scan, {"seed_zyx": [20, 30, 40]})
+    mask = segment(scan, {"seed_zyx": [20, 30, 40], "intensity_shift": 0.0})  # geometry only
     assert fake.cubes[0].argmax() == np.ravel_multi_index((40, 30, 20), (SIZE, SIZE, SIZE))
     assert fake.clicks == [(40, 30, 20)]
     assert mask[20, 30, 40] == 1
     data2 = data.copy()
     data2[20, 30, 42] = 900.0  # two voxels along x from the click: axis 0 of the network's cube
-    segment(Volume(data2, (1.5, 1.5, 1.5), "HU", "dicom", "0" * 64), {"seed_zyx": [20, 30, 40]})
+    segment(Volume(data2, (1.5, 1.5, 1.5), "HU", "dicom", "0" * 64), {"seed_zyx": [20, 30, 40], "intensity_shift": 0.0})
     assert np.unravel_index(fake.cubes[1].argmax(), (SIZE, SIZE, SIZE)) == (42, 30, 20)
 
 
@@ -298,8 +298,8 @@ def test_a_mask_reaching_the_edge_of_the_box_warns(fake, monkeypatch):
     assert any("cut off" in warning for warning in report["warnings"])
 
 
-def test_a_scan_above_0_warns(fake):
-    report = segment(volume(), {"seed_zyx": [30, 35, 40]}).report
+def test_a_scan_above_0_warns_when_it_is_not_shifted(fake):
+    report = segment(volume(), {"seed_zyx": [30, 35, 40], "intensity_shift": 0.0}).report
     assert report["normalisation"]["air_is_above_0"] is True
     assert any("also takes in the air" in warning for warning in report["warnings"])
 
@@ -420,7 +420,7 @@ def _config(tmp_path, *, box=None, seed=(30, 35, 40), shape=(60, 70, 80), target
 BOX = {"min_mm": [40.0, 40.0, 40.0], "max_mm": [100.0, 100.0, 100.0]}
 
 
-def test_the_runner_crops_to_the_box_like_the_other_box_methods(tmp_path, fake):
+def test_the_runner_keeps_the_mask_in_the_box(tmp_path, fake):
     result = run_experiment(_config(tmp_path, box=BOX))  # 60 mm a side: voxels 20-49 of each axis
     directory = tmp_path / "results" / "exp"
     for name in ("config.yaml", "mask.nii.gz", "mesh.glb", "metrics.json", "run.log", "method_report.json"):
@@ -479,3 +479,68 @@ def test_methods_without_a_report_still_crop_to_the_box(tmp_path):
     assert "box" not in seen["parameters"]
     assert "method_report" not in result.metrics
     assert ndi.label(result.mask)[1] == 1
+
+
+# --- closer to training: scan context, trained spacing, automatic shift ----------------------------
+
+def test_a_box_given_as_box_zyx_gives_the_cropped_runs_mask(fake):
+    scan = volume()
+    box = (slice(10, 50), slice(10, 60), slice(15, 65))
+    cropped = Volume(np.ascontiguousarray(scan.data[box]), scan.spacing_mm, "HU", "dicom", "0" * 64)
+    local = segment(cropped, {"seed_zyx": [20, 25, 25], **pipeline.PADDED_NO_SHIFT})
+    whole = segment(scan, {"seed_zyx": [30, 35, 40], "box_zyx": [[w.start, w.stop] for w in box], **pipeline.PADDED_NO_SHIFT})
+    restored = np.zeros(scan.shape, np.uint8)
+    restored[box] = local
+    assert np.array_equal(whole, restored) and np.array_equal(fake.cubes[0], fake.cubes[-1]) and len(fake.cubes) == 1
+
+
+def test_context_scan_fills_the_cube_with_the_scan_and_keeps_the_mask_in_the_box(fake, monkeypatch):
+    monkeypatch.setattr(FakeNetwork, "predict", lambda self, embedding, click: np.ones((SIZE,) * 3, np.float32))
+    scan = volume(shape=(100, 100, 100))
+    box = [[40, 60], [30, 70], [45, 55]]  # 40 x 80 x 20 mm, cube 80 mm: inside the 200 mm scan
+    mask = segment(scan, {"seed_zyx": [50, 50, 50], "box_zyx": box, "context": "scan"})
+    assert mask.report["padding_share_of_cube"] == 0.0 and mask.report["view_mm"]["min_zyx"] == [80.0, 60.0, 90.0]
+    assert int(mask.sum()) == 20 * 40 * 10 and mask[40:60, 30:70, 45:55].all()
+    assert (fake.cubes[-1] != fake.cubes[-1][0, 0, 0]).mean() > 0.99  # scan everywhere, no constant padding
+    padded = segment(scan, {"seed_zyx": [50, 50, 50], "box_zyx": box, "context": "box"})
+    assert padded.report["padding_share_of_cube"] == pytest.approx(1 - 40 * 80 * 20 / 80**3)
+
+
+def test_trained_spacing_is_kept_unless_the_box_is_longer_than_the_cube(fake):
+    small = segment(volume(), {"seed_zyx": [30, 35, 40], "spacing": "trained"}).report  # 160 mm box
+    assert small["spacing_mm"] == 1.5 and small["side_mm"] == 192
+    long = segment(volume(shape=(150, 20, 20)), {"seed_zyx": [70, 10, 10], "spacing": "trained"}).report  # 300 mm
+    assert long["spacing_mm"] == pytest.approx(300 / 128)
+
+
+def test_the_automatic_shift_follows_its_rule_and_leaves_hu_alone():
+    values = np.r_[np.full(600, 1000.0), np.full(400, 3100.0)]  # "air" and "tissue", both above 0
+    rule = pipeline.auto_shift(values)
+    assert rule["air"] == 1000 and rule["tissue"] == 3100 and rule["applied"]
+    assert rule["shift"] == pytest.approx(-(1000 + 1000 / 1050 * 2100))
+    # the trigger: 1% or more of the box below 0 is a scan that already has air below 0 (HU), even when
+    # Otsu's low class sits above 0, as on the tuna; under 1% (noise in raw unsigned CT) is shifted
+    tuna_like = np.r_[np.full(400, -900.0), np.full(500, 10.0), np.full(100, 5000.0)]
+    assert pipeline.auto_shift(tuna_like)["air"] > 0 and pipeline.auto_shift(tuna_like)["shift"] == 0.0
+    assert pipeline.auto_shift(np.r_[values, np.full(9, -20.0)])["applied"]
+    assert not pipeline.auto_shift(np.r_[values, np.full(11, -20.0)])["applied"]
+
+
+def test_the_automatic_shift_is_reported_and_used(fake):
+    scan = volume()
+    scan.data[:, :, :40] = 5.0  # air above 0 next to tissue at about 100
+    report = segment(scan, {"seed_zyx": [30, 35, 60], "intensity_shift": "auto"}).report
+    assert report["intensity_shift_rule"]["air"] == 5.0
+    assert report["normalisation"]["intensity_shift"] == report["intensity_shift_rule"]["shift"] < 0
+    assert not report["normalisation"]["air_is_above_0"]
+
+
+def test_the_runner_gives_the_whole_scan_for_context_scan(tmp_path, fake):
+    path = _config(tmp_path, box=BOX)
+    config = yaml.safe_load(path.read_text())
+    config["algorithm"]["parameters"] = {"context": "scan", "spacing": "trained"}
+    path.write_text(yaml.safe_dump(config))
+    result = run_experiment(path)
+    direct = segment(volume(), {"seed_zyx": [30, 35, 40], "box_zyx": [[20, 50]] * 3, "context": "scan", "spacing": "trained"})
+    assert np.array_equal(result.mask, np.asarray(direct)) and result.mask[30, 35, 40] == 1
+    assert result.metrics["method_report"]["context"] == "scan" and result.metrics["reference_share_in_view"] == 1.0

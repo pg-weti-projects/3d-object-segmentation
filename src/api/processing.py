@@ -53,10 +53,11 @@ def process_volume(volume, form, *, include_slices: bool = True) -> dict:
 
 
 def preprocessing_config(form) -> PreprocessingConfig:
-    """Build preprocessing settings from submitted form values."""
-    target = tuple(float(value.strip()) for value in form["target_spacing"].split(","))
-    hu_range = tuple(float(value.strip()) for value in form["hu_range"].split(","))
-    if len(target) != 3 or len(hu_range) != 2:
+    """Build preprocessing settings from submitted form values. An empty field or 'none' turns that
+    step off (no resampling, no clipping), as null does in an experiment config."""
+    target = _numbers_or_none(form["target_spacing"])
+    hu_range = _numbers_or_none(form["hu_range"])
+    if (target is not None and len(target) != 3) or (hu_range is not None and len(hu_range) != 2):
         raise ValueError("Invalid preprocessing parameter format.")
     return PreprocessingConfig(
         target_spacing=target,
@@ -64,6 +65,13 @@ def preprocessing_config(form) -> PreprocessingConfig:
         invert_hu=form.get("invert_hu") == "on",
         denoise=form.get("denoise") == "on",
     )
+
+
+def _numbers_or_none(text: str) -> tuple[float, ...] | None:
+    text = (text or "").strip()
+    if text.lower() in {"", "none", "null"}:
+        return None
+    return tuple(float(value.strip()) for value in text.split(","))
 
 
 def slices_for_preview(data: np.ndarray) -> list[list[list[float]]]:

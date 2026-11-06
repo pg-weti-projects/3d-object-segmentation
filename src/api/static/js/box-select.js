@@ -88,7 +88,7 @@ function update(setSeed) {
   keys.forEach((key) => (fields[key].value = box ? String(box[key]) : ""));
   clearButton.hidden = !box;
   status.textContent = box
-    ? `x ${box.x0}–${box.x1 - 1}, y ${box.y0}–${box.y1 - 1} (${box.x1 - box.x0} × ${box.y1 - box.y0} voxels, all slices)`
+    ? `x ${box.x0}–${box.x1 - 1}, y ${box.y0}–${box.y1 - 1} (${box.x1 - box.x0} × ${box.y1 - box.y0} voxels; slices as set below)`
     : defaultStatus;
   if (box && setSeed && seedInput) {
     const z = Math.min(Number(slider.value) * step[0], fullShape[0] - 1);
@@ -138,6 +138,16 @@ window.addEventListener(
     dragged = false;
   },
   true,
+);
+
+// "current" next to the slice range: the axial slice shown now, in full-volume voxels.
+document.querySelectorAll(".slice-from-axial").forEach((button) =>
+  button.addEventListener("click", () => {
+    const target = document.getElementById(button.dataset.target);
+    if (target) {
+      target.value = String(Math.min(Number(slider.value) * step[0], fullShape[0] - 1));
+    }
+  }),
 );
 
 clearButton.addEventListener("click", () => {

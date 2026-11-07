@@ -1,13 +1,11 @@
 """
-segment(volume, parameters): one click on the contents of a box, one cube, one mask on the volume's grid.
+segment(volume, parameters): one click in a box, one cube, one mask on the volume's grid.
 
-The cube is centred on the user's 3D box and scaled so that the box's longest side fills it. By
-default (context "scan") the rest of the cube shows the scan around the box, as in training, and
-the mask is then set to 0 outside the box; with context "box" the runner crops to the box and the
-shorter sides are padded (`PADDED_NO_SHIFT`). Before the scan is shrunk onto a coarser cube it is
-smoothed, so that fine detail does not alias. The box is never a model prompt. A cube centred on
-the click alone was tried and dropped: on upstream's human CT it scored a median Dice of 0.32 over
-15 organs, against the 0.50 required (see the README).
+The cube is centred on the user's 3D box and scaled so that the box's longest side fills it; the
+rest of the cube shows the scan around the box, as in training, and the mask is set to 0 outside
+the box. Before the scan is shrunk onto a coarser cube it is smoothed, so that fine detail does not
+alias. The box is never a model prompt. A cube centred on the click alone was tried and dropped: on
+upstream's human CT it scored a median Dice of 0.32 over 15 organs, against the 0.50 required.
 
 Nothing else is post-processed: no component filtering, no sliding window. A target that reaches
 the edge of the box may be cut off, and the report says so.
@@ -32,29 +30,17 @@ from . import assets, cube as geometry, network
 
 logger = logging.getLogger(__name__)
 
-PADDING_MINIMUM = "minimum"
-TRAINED_SPACING_MM = 1.5  # with spacing "box" reported against, not used: the box sets the spacing
-CONTEXTS = ("box", "scan")
-SPACINGS = ("box", "trained")
+TRAINED_SPACING_MM = 1.5  # reported against, not used: the box sets the spacing
+PADDING = 0.0  # cube voxels outside the scan, as upstream
 AUTO = "auto"
 AIR_TO_ZERO = 1000 / 1050  # where 0 lies in HU between air (-1000) and soft tissue (+50)
 BELOW_0_TRIGGER = 0.01  # "auto" shifts only a box with less than this share of its voxels below 0
-# The method before the defaults changed on 2026-11-06, as the first fish evaluation ran it
-# (results/sam_med3d_fish, 2026-11-05): the cube holds only the box's contents, padded with 0, and the
-# scan is not shifted. Scripts that reproduce those results pass it explicitly.
-PADDED_NO_SHIFT = {"context": "box", "intensity_shift": 0.0}
 
 DEFAULT_PARAMETERS: dict[str, Any] = {
     "seed_zyx": None,  # required: the click, as a voxel of the volume it is given
-    "padding": 0.0,  # value outside the scan (and the box, with context "box"), as upstream, or "minimum"
-    "threshold": 0.5,  # on the sigmoid, as upstream
-    "clamp": None,  # [low, high] applied to the scan first; None = as upstream's validation
-    "intensity_shift": AUTO,  # added to the scan after the clamp and before the z-score: a number, or
-    # "auto" = the rule of `auto_shift` (0, as upstream, on scans whose air is below 0)
-    "context": "scan",  # what fills the cube past the box: "scan" = the scan around it (the runner then
-    # gives the whole scan and box_zyx, see `takes_scan`); "box" = padding
-    "spacing": "box",  # cube voxel: "box" = longest box side / 128; "trained" = never finer than 1.5 mm
     "box_zyx": None,  # [[start, stop]] x 3, voxels of the box in the volume given; None = all of it
+    "threshold": 0.5,  # on the sigmoid, as upstream
+    "intensity_shift": AUTO,  # added to the scan before the z-score: a number, or "auto" (`auto_shift`)
     "device": "cpu",
     "threads": None,  # None = torch's default
 }
@@ -85,32 +71,21 @@ def resolve_parameters(parameters: Mapping[str, Any] | None) -> dict[str, Any]:
         raise ValueError("sam_med3d needs a click: set data.seed_zyx to a voxel inside the target.")
     if params["intensity_shift"] != AUTO:
         _number(params["intensity_shift"], f"intensity_shift (a number or '{AUTO}')")
-    for key, allowed in (("context", CONTEXTS), ("spacing", SPACINGS)):
-        if params[key] not in allowed:
-            raise ValueError(f"{key}={params[key]!r}: expected one of {list(allowed)}")
     threshold = _number(params["threshold"], "threshold")
     if not 0 < threshold < 1:
         raise ValueError(f"threshold={threshold!r}: expected a number between 0 and 1")
-    if params["padding"] != PADDING_MINIMUM:
-        _number(params["padding"], f"padding (a number or '{PADDING_MINIMUM}')")
-    clamp = params["clamp"]
-    if clamp is not None and (len(clamp) != 2 or not float(clamp[0]) < float(clamp[1])):
-        raise ValueError(f"clamp={clamp!r}: expected [low, high] with low < high")
     return params
 
 
-def prepare(values: np.ndarray, inside: np.ndarray, params: Mapping[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
-    """Clamp and shift the scan voxels, pad the rest, then upstream's z-score (over voxels above 0,
+def prepare(values: np.ndarray, inside: np.ndarray, intensity_shift: float = 0.0) -> tuple[np.ndarray, dict[str, Any]]:
+    """Shift the scan voxels, pad the rest with 0, then upstream's z-score (over voxels above 0,
     with torch's unbiased std, applied to the whole cube)."""
     prepared = np.array(values, dtype=np.float32)
-    if params["clamp"] is not None:
-        prepared[inside] = np.clip(prepared[inside], float(params["clamp"][0]), float(params["clamp"][1]))
-    prepared[inside] += float(params["intensity_shift"])
+    prepared[inside] += float(intensity_shift)
     scan_voxels = prepared[inside]
     if scan_voxels.size == 0:
         raise ValueError("The cube does not overlap the scan")
-    padding = float(scan_voxels.min()) if params["padding"] == PADDING_MINIMUM else float(params["padding"])
-    prepared[~inside] = padding
+    prepared[~inside] = PADDING
 
     above = prepared > 0
     count = int(above.sum())
@@ -121,9 +96,7 @@ def prepare(values: np.ndarray, inside: np.ndarray, params: Mapping[str, Any]) -
         raise ValueError("The voxels above 0 in the cube all have one value, so there is nothing to normalise")
     report = {
         "method": "z-score over voxels above 0, as upstream",
-        "clamp": params["clamp"],
-        "intensity_shift": float(params["intensity_shift"]),
-        "padding_value": padding,
+        "intensity_shift": float(intensity_shift),
         "share_of_cube_above_0": count / prepared.size,
         "share_of_scan_voxels_above_0": float((scan_voxels > 0).mean()),
         "air_is_above_0": bool(scan_voxels.min() > 0),
@@ -178,73 +151,60 @@ def segment(volume: Volume, parameters: Mapping[str, Any] | None = None) -> Mask
     box_low = tuple(w.start * s for w, s in zip(box, spacing))
     box_high = tuple(w.stop * s for w, s in zip(box, spacing))
     extent_mm = tuple(b - a for a, b in zip(box_low, box_high))
-    trained = params["spacing"] == "trained"
-    cube = geometry.cube_on_box(box_low, box_high, TRAINED_SPACING_MM if trained else None)
+    cube = geometry.cube_on_box(box_low, box_high)
     click_xyz = geometry.network_click(click_mm, cube)
 
-    # what the cube is sampled from: the box alone (padding past it), or the scan around the cube
-    region = box if params["context"] == "box" else geometry.region_around(cube, shape, spacing)
+    # the cube is sampled from the scan around it, not from the box alone
+    region = geometry.region_around(cube, shape, spacing)
     offset = tuple(w.start * s for w, s in zip(region, spacing))
     local_cube = geometry.Cube(tuple(c - o for c, o in zip(cube.corner_mm, offset)), cube.spacing_mm)
     data = volume.data[region]
 
-    params = dict(params)
     shift_rule = None
-    if params["intensity_shift"] == AUTO:
+    shift = params["intensity_shift"]
+    if shift == AUTO:
         shift_rule = auto_shift(volume.data[box])
-        params["intensity_shift"] = shift_rule["shift"]
+        shift = shift_rule["shift"]
 
     smoothed, sigma = geometry.antialias(data, spacing, cube.spacing_mm)
     values, inside = geometry.sample(smoothed, spacing, local_cube)
     del smoothed
-    prepared, normalisation = prepare(values, inside, params)
+    prepared, normalisation = prepare(values, inside, shift)
     net = network.get_network(str(params["device"]), params["threads"])
     embedding = net.embed(geometry.to_network_axes(prepared))
     probability = geometry.to_network_axes(net.predict(embedding, click_xyz))
     cube_mask = probability > float(params["threshold"])
     mask = np.zeros(shape, dtype=np.uint8)
     mask[region] = geometry.paste_back(cube_mask, local_cube, data.shape, spacing)
-    if region != box:  # the mask counts only inside the box
-        in_box = np.zeros(shape, dtype=bool)
-        in_box[box] = True
-        mask[~in_box] = 0
+    in_box = np.zeros(shape, dtype=bool)
+    in_box[box] = True
+    mask[~in_box] = 0  # the mask counts only inside the box
 
     report: dict[str, Any] = {
         "spacing_mm": cube.spacing_mm,
         "spacing_vs_trained": cube.spacing_mm / TRAINED_SPACING_MM,
         "side_mm": cube.side_mm,
         "box_extent_mm_zyx": list(extent_mm),
-        "context": params["context"],
-        "spacing_rule": params["spacing"],
         "smoothing_sigma_voxels_zyx": list(sigma),
         "click_mm_zyx": list(click_mm),
         "click_in_cube_xyz": list(click_xyz),
         "threshold": float(params["threshold"]),
-        "post_processing": None if region == box else "mask set to 0 outside the box",
         "encoder_output_reused": bool(getattr(net, "last_was_cached", False)),
         "normalisation": normalisation,
         "intensity_shift_rule": shift_rule,
-        "view_mm": {"min_zyx": list(box_low), "max_zyx": list(box_high)},  # the mask can only be in the box
-        "padding_share_of_cube": (
-            1.0 - float(np.prod([e / cube.side_mm for e in extent_mm])) if region == box else 1.0 - float(inside.mean())
-        ),
+        "padding_share_of_cube": 1.0 - float(inside.mean()),
     }
     report["box_faces_reached"] = _faces_reached(mask[box])
     report["warnings"] = _warnings(report)
     return MaskWithReport(mask, report)
 
 
-def takes_scan(parameters: Mapping[str, Any] | None) -> bool:
-    """With context "scan" the runner gives the whole scan and the box (box_zyx) instead of cropping."""
-    return dict(parameters or {}).get("context", DEFAULT_PARAMETERS["context"]) == "scan"
-
-
-segment.needs_box = True  # the runner refuses a run without data.box; with context "box" it crops to it
-segment.takes_scan = takes_scan
+segment.needs_box = True  # the runner refuses a run without data.box
+segment.takes_box = True  # the runner gives the whole scan and the box (box_zyx) instead of cropping to it
 
 
 def _faces_reached(mask: np.ndarray) -> list[str]:
-    """The faces of the volume it was given (the box) that the mask reaches: there the target may go on."""
+    """The faces of the box that the mask reaches: there the target may go on."""
     faces = []
     for axis in range(3):
         if np.take(mask, 0, axis=axis).any():
@@ -270,11 +230,9 @@ def _warnings(report: Mapping[str, Any]) -> list[str]:
     return warnings
 
 
-def _number(value: Any, name: str, above: float | None = None) -> float:
+def _number(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, numbers.Real) or not np.isfinite(value):
         raise ValueError(f"{name}={value!r}: expected a number")
-    if above is not None and value <= above:
-        raise ValueError(f"{name}={value!r}: expected a number above {above}")
     return float(value)
 
 

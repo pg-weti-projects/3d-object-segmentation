@@ -40,16 +40,15 @@
                 <div class="col-md-6">
                   <label class="form-label" for="target_spacing">Target spacing (Z, Y, X)</label>
                   <input class="form-control" type="text" id="target_spacing" name="target_spacing" value="{{ form.get('target_spacing', '1,1,1') }}">
-                  <div class="form-text">Resampling in mm; <code>none</code> keeps the scan's own voxels.</div>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label" for="hu_range">HU range (min, max)</label>
                   <input class="form-control" type="text" id="hu_range" name="hu_range" value="{{ form.get('hu_range', '-1000,200') }}">
-                  <div class="form-text">Values are clipped to this window, and the analytical methods scale it to [0, 1]; <code>none</code> keeps every value.</div>
+                  <div class="form-text">The image is scaled to [0, 1] in this window before segmentation.</div>
                 </div>
               </div>
               <div class="alert alert-info small mt-3 mb-0" role="note">
-                <strong>For SAM-Med3D</strong> set target spacing and HU range to <code>none</code> and untick denoising, as in an experiment config. The defaults above change its input a lot: clipping at 200 makes a scan above that one flat value (Gadus cannot run at all), and resampling changes the voxels the model sees.
+                <strong>For SAM-Med3D</strong> set target spacing and HU range to <code>none</code> and untick denoising, so that the model sees the scan as it is (as in an experiment config).
               </div>
               <div class="mt-3">
                 <div class="form-check mb-2">

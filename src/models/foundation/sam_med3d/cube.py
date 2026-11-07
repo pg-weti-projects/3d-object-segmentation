@@ -38,11 +38,10 @@ def voxel_centre_mm(voxel_zyx, spacing_zyx) -> tuple[float, float, float]:
     return tuple((v + 0.5) * s for v, s in zip(voxel_zyx, spacing_zyx))
 
 
-def cube_on_box(box_min_mm, box_max_mm, min_spacing_mm: float | None = None) -> Cube:
-    """Centred on the box, isotropic, with its longest side filling the cube; with `min_spacing_mm`,
-    never finer than that (the cube then reaches past the box)."""
+def cube_on_box(box_min_mm, box_max_mm) -> Cube:
+    """Centred on the box, isotropic, with its longest side filling the cube."""
     extent = [high - low for low, high in zip(box_min_mm, box_max_mm)]
-    spacing = max(max(extent) / SIZE, min_spacing_mm or 0.0)
+    spacing = max(extent) / SIZE
     centre = [(low + high) / 2 for low, high in zip(box_min_mm, box_max_mm)]
     return Cube(tuple(c - SIZE * spacing / 2 for c in centre), float(spacing))
 

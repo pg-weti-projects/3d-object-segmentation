@@ -1,7 +1,7 @@
 """Our cube and our network against upstream's, from tests/data/sam_med3d_golden.npz. That file holds
-upstream's own output (torchio's cube, medim's network) on input generated in
-scripts/sam_med3d_golden.py; to regenerate it, see that script. The cube needs no weights, so it is
-a fast test. The network needs them, so it is slow."""
+upstream's own output (torchio's cube, medim's network) on the synthetic input below, recorded once
+with upstream's code. The cube needs no weights, so it is a fast test. The network needs them, so it
+is slow."""
 
 from __future__ import annotations
 
@@ -11,12 +11,43 @@ import nibabel as nib
 import numpy as np
 import pytest
 
-from scripts.sam_med3d_golden import PREPARE, STRIDE, cube_from_affine, synthetic_cube, synthetic_scan
 from src.models.foundation.sam_med3d import assets, cube as geometry
 from src.models.foundation.sam_med3d.network import SamMed3D
 from src.models.foundation.sam_med3d.pipeline import prepare
 
 FIXTURE = np.load(Path(__file__).parent / "data" / "sam_med3d_golden.npz")
+STRIDE = 8  # of a 128^3 cube, in the fixture
+
+
+def synthetic_scan() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A small scan (x, y, z), its label and its affine, on a grid like upstream's test scan: thick
+    slices, and the x axis running from the patient's left, so that canonical order flips it."""
+    x, y, z = np.mgrid[:64, :72, :30].astype(np.float64)
+    data = np.full(x.shape, -1000.0)
+    data[((x - 32) / 28) ** 2 + ((y - 36) / 32) ** 2 + ((z - 15) / 13) ** 2 <= 1] = 40.0
+    data += 30 * np.sin(x / 5) * np.cos(y / 7) * np.sin(z / 3 + 1)
+    label = ((x - 24) / 10) ** 2 + ((y - 30) / 9) ** 2 + ((z - 12) / 4) ** 2 <= 1
+    data[label] = 250.0
+    affine = np.array([[-0.8, 0, 0, 120.0], [0, 0.8, 0, -40.0], [0, 0, 4.0, 10.0], [0, 0, 0, 1.0]])
+    return data.astype(np.int16), label.astype(np.uint8), affine
+
+
+def synthetic_cube() -> np.ndarray:
+    """A normalised cube for the network part of the fixture."""
+    x, y, z = np.mgrid[:128, :128, :128].astype(np.float32)
+    field = np.sin(x / 9) * np.cos(y / 13) * np.sin(z / 7)
+    field[((x - 70) / 20) ** 2 + ((y - 60) / 25) ** 2 + ((z - 64) / 18) ** 2 <= 1] += 2.0
+    return field.astype(np.float32)
+
+
+def cube_from_affine(roi_affine: np.ndarray, scan_affine: np.ndarray, spacing_zyx) -> geometry.Cube:
+    """The placement of upstream's cube, in our mm: voxel i of an axis covers [i * s, (i + 1) * s)."""
+    size = float(roi_affine[0, 0])
+    corner_xyz = [
+        roi_affine[axis, 3] - size / 2 - (scan_affine[axis, 3] - spacing_zyx[2 - axis] / 2)
+        for axis in range(3)
+    ]
+    return geometry.Cube(tuple(corner_xyz[::-1]), size)
 
 
 def _our_cube(truncate: bool) -> np.ndarray:
@@ -28,7 +59,7 @@ def _our_cube(truncate: bool) -> np.ndarray:
     values, inside = geometry.sample(array, spacing, cube)
     if truncate:
         values[inside] = np.trunc(np.asarray(values[inside], dtype=np.float64))
-    return geometry.to_network_axes(prepare(values, inside, PREPARE)[0])
+    return geometry.to_network_axes(prepare(values, inside)[0])
 
 
 def test_our_cube_is_upstreams_cube_once_truncated_like_its_resampler():

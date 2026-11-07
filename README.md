@@ -41,24 +41,24 @@ running.
 The Flask application is organized around separate routes, so further pages
 and endpoints can be added without changing the application entry point.
 
-| Method | Endpoint                                          | Purpose                                                                            |
-| ------ | ------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `GET`  | `/preprocess`                                     | Display the volume preprocessing form                                              |
-| `GET`  | `/datasets`                                       | Redirect to the unified raw data preprocessing page                                |
-| `POST` | `/datasets`                                       | Save uploaded files as a new server-side dataset                                   |
-| `POST` | `/datasets/refresh`                               | Re-scan all server-side datasets in the background                                 |
-| `POST` | `/datasets/<id>/delete`                           | Delete a server-side dataset and all of its files                                  |
-| `POST` | `/datasets/<id>/rename`                           | Rename a server-side dataset                                                       |
-| `POST` | `/datasets/<id>/sources/delete`                   | Delete one source item from a dataset                                              |
-| `GET`  | `/api/datasets/status`                            | Report background dataset indexing status                                          |
-| `GET`  | `/viewer`                                         | 3D mesh viewer (`?id=<result>` opens `results/<result>/mesh.*`)                    |
-| `GET`  | `/meshes/<id>/mesh.<fmt>`                         | Mesh as `glb`, `stl`, `obj` or `ply` (`?download=1` saves the file)                |
-| `POST` | `/process`                                        | Load and preprocess a selected server source or uploaded JSON, TIFF, or DICOM data |
-| `POST` | `/viewer/build`                                   | Build a mesh from an uploaded NIfTI mask and open it in the viewer                 |
-| `POST` | `/process/start`                                  | Start server-side preprocessing in the background                                  |
-| `GET`  | `/process/<job_id>/status`                        | Get background preprocessing status                                                |
-| `GET`  | `/process/<job_id>/result`                        | Open the preview for a completed preprocessing job                                 |
-| `GET`  | `/datasets/<id>/sources/<source>/recommendations` | Calculate preprocessing suggestions for a validated source                         |
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/preprocess` | Display the volume preprocessing form |
+| `GET` | `/datasets` | Redirect to the unified raw data preprocessing page |
+| `POST` | `/datasets` | Save uploaded files as a new server-side dataset |
+| `POST` | `/datasets/refresh` | Re-scan all server-side datasets in the background |
+| `POST` | `/datasets/<id>/delete` | Delete a server-side dataset and all of its files |
+| `POST` | `/datasets/<id>/rename` | Rename a server-side dataset |
+| `POST` | `/datasets/<id>/sources/delete` | Delete one source item from a dataset |
+| `GET` | `/api/datasets/status` | Report background dataset indexing status |
+| `GET` | `/viewer` | 3D mesh viewer (`?id=<result>` opens `results/<result>/mesh.*`) |
+| `GET` | `/meshes/<id>/mesh.<fmt>` | Mesh as `glb`, `stl`, `obj` or `ply` (`?download=1` saves the file) |
+| `POST` | `/process` | Load and preprocess a selected server source or uploaded JSON, TIFF, or DICOM data |
+| `POST` | `/viewer/build` | Build a mesh from an uploaded NIfTI mask and open it in the viewer |
+| `POST` | `/process/start` | Start server-side preprocessing in the background |
+| `GET` | `/process/<job_id>/status` | Get background preprocessing status |
+| `GET` | `/process/<job_id>/result` | Open the preview for a completed preprocessing job |
+| `GET` | `/datasets/<id>/sources/<source>/recommendations` | Calculate preprocessing suggestions for a validated source |
 
 Uploaded datasets are stored under `data/raw` and remain available after the
 application is restarted. At application startup, server-side datasets are
@@ -141,16 +141,6 @@ preprocessing.
 Future route groups can be added for `/segmentation`, `/mesh`, `/metrics`, and
 `/export`.
 
-### Preparing the project's scans
-
-`scripts/prepare_data.py` builds the scans in `data/raw/` from the original files
-(by default in `../data-from-mm`), in the layout above. It can be overridden with --originals <folder>. The originals are only
-read, and what already exists is skipped unless `--force` is given:
-
-```bash
-python scripts/prepare_data.py
-```
-
 ### 3D viewer
 
 `/viewer` shows meshes stored as `results/<experiment_id>/mesh.<format>` (the
@@ -183,24 +173,12 @@ the slice where it is largest) and click inside it to set the seed point. The bo
 covers all slices, the method receives only its contents, and the mask is put
 back on the full grid, so mesh and metrics always work on the whole scan.
 
-| Method                    | What it does                                                                            |
-| ------------------------- | --------------------------------------------------------------------------------------- |
-| `box_region`              | Thresholds between the brightness of the bladder and of the tissue, limited to the body |
-| `chan_vese`               | Improved Chan-Vese, 2D slice by slice                                                   |
-| `geodesic_active_contour` | Geodesic active contour (MorphGAC), 3D                                                  |
-| `growcut`                 | GrowCut cellular automaton, 3D                                                          |
-
-SAM-Med3D (`sam_med3d`) needs the box too, with a slice range: its 128³ cube is
-centred on the box and scaled so that the box's longest side fills it. By
-default the rest of the cube shows the scan around the box (`context: scan`),
-and the mask is kept inside the box. On scans with almost nothing below 0
-(mass density, Gadus), `intensity_shift: auto` moves 0 to where HU has it,
-because the model's normalisation assumes HU. HU scans are not shifted. The
-earlier evaluated version, with padding and no shift, is `context: box`,
-`intensity_shift: 0`. A click-only variant, with the cube centred on the click,
-was tried and dropped: on the human CT shipped with SAM-Med3D it reached a
-median Dice of 0.32 over 15 organs (the best of six click-only variants reached
-0.39), against the 0.50 required.
+| Method | What it does |
+|---|---|
+| `box_region` | Thresholds between the brightness of the bladder and of the tissue, limited to the body |
+| `chan_vese` | Improved Chan-Vese, 2D slice by slice |
+| `geodesic_active_contour` | Geodesic active contour (MorphGAC), 3D |
+| `growcut` | GrowCut cellular automaton, 3D |
 
 Each of the three analytical methods can start either from a small ball around
 the seed point (`init_from: seed_ball`, the default) or from the measured
@@ -208,16 +186,16 @@ contrast between the bladder and the tissue (`init_from: contrast`), which is
 much more accurate on our scans and reports whether the contrast is high enough
 to trust the result at all:
 
-| Method                    | Oreo, seed ball | Oreo, contrast | Gadus, seed ball | Gadus, contrast |
-| ------------------------- | --------------- | -------------- | ---------------- | --------------- |
-| `box_region`              | -               | **0.949**      | -                | 0.628           |
-| `chan_vese`               | 0.085           | 0.939          | 0.233            | 0.494           |
-| `geodesic_active_contour` | 0.180           | 0.772          | 0.210            | **0.727**       |
-| `growcut`                 | 0.585           | 0.851          | 0.597            | 0.586           |
+| Method | Oreo, seed ball | Oreo, contrast | Gadus, seed ball | Gadus, contrast |
+|---|---|---|---|---|
+| `box_region` | - | **0.949** | - | 0.628 |
+| `chan_vese` | 0.085 | 0.939 | 0.233 | 0.494 |
+| `geodesic_active_contour` | 0.180 | 0.772 | 0.210 | **0.727** |
+| `growcut` | 0.585 | 0.851 | 0.597 | 0.586 |
 
 Dice against the reference mask, same box and same seed point for every method.
-On the Bluefin tuna the bladder is brighter than the tissue around it, which these
-methods do not look for, and contrast starts reach at most Dice 0.10.
+On the Bluefin tuna every method returns an empty mask with `init_from: contrast`,
+because what its reference mask outlines is as dense as the tissue around it.
 See [docs/contrast.md](docs/contrast.md) for how the contrast is measured, what
 it changes for each method, and how to reproduce the table:
 
@@ -225,6 +203,29 @@ it changes for each method, and how to reproduce the table:
 python scripts/measure_contrast.py
 python scripts/compare_methods.py
 ```
+
+### SAM-Med3D
+
+`sam_med3d` runs the SAM-Med3D foundation model (`sam_med3d_turbo.pth`, no
+training) on one click in a 3D box. The box must also be limited in z: the
+model's 128³ cube is centred on the box and scaled so that its longest side
+fills it. The rest of the cube shows the scan around the box, and the mask is
+kept inside the box. Its normalisation assumes HU, so on scans with almost
+nothing below 0 (mass density, Gadus) `intensity_shift: auto` moves 0 to where
+HU has it; HU scans are left as they are. A click-only variant, with the cube
+centred on the click, was tried and dropped because its Dice was too low.
+
+Torch, the pinned upstream source and the weights are installed separately:
+
+```bash
+python scripts/install_sam_med3d.py
+python -m src.pipeline.runner configs/experiments/sam_med3d_oreo.yaml
+python -m pytest -m slow    # the tests that need the real weights
+```
+
+On `/segment`, load the scan with target spacing and HU range `none` and
+denoising off (so that the model sees it as in a config), draw the box, and set
+its first and last slice. The first run loads the weights and takes a while.
 
 ### Preparing a DICOM dump
 
@@ -240,17 +241,16 @@ python scripts/to_dicom_folders.py data/raw/DD2210_Blue_Tuna/DD2210
 The files already are DICOM; they only get a name the loader recognises, and one
 folder per series. `--dry-run` prints what the dump holds:
 
-| folder                 | description       | slices | size    | thickness | z step |
-| ---------------------- | ----------------- | ------ | ------- | --------- | ------ |
-| `02_CUERPO_CUERPO_7_0` | CUERPO CUERPO 7.0 | 263    | 512x512 | 7 mm      | 3.5 mm |
-| `03_HUESO_HUESO_7_0`   | HUESO HUESO 7.0   | 263    | 512x512 | 7 mm      | 3.5 mm |
-| `04_CUERPO_CUERPO_2_0` | CUERPO CUERPO 2.0 | 918    | 512x512 | 2 mm      | 1 mm   |
-| `06_HUESO_HUESO_2_0`   | HUESO HUESO 2.0   | 918    | 512x512 | 2 mm      | 1 mm   |
+| folder | description | slices | size | thickness | z step |
+|---|---|---|---|---|---|
+| `02_CUERPO_CUERPO_7_0` | CUERPO CUERPO 7.0 | 263 | 512x512 | 7 mm | 3.5 mm |
+| `03_HUESO_HUESO_7_0` | HUESO HUESO 7.0 | 263 | 512x512 | 7 mm | 3.5 mm |
+| `04_CUERPO_CUERPO_2_0` | CUERPO CUERPO 2.0 | 918 | 512x512 | 2 mm | 1 mm |
+| `06_HUESO_HUESO_2_0` | HUESO HUESO 2.0 | 918 | 512x512 | 2 mm | 1 mm |
 
 (plus two scout/report series and one reformat). `CUERPO` is the body kernel and
-`HUESO` the bone kernel; the reference masks share the grid of `02_CUERPO_CUERPO_7_0`
-and `03_HUESO_HUESO_7_0` (which one they were drawn on is not established), and
-`04_CUERPO_CUERPO_2_0` is the same body at 1 mm, covering the same z range
+`HUESO` the bone kernel; the reference mask belongs to `02_CUERPO_CUERPO_7_0`,
+and `04_CUERPO_CUERPO_2_0` is the same body at 1 mm, covering the same z range
 from the same origin.
 
 Note that these slices overlap: 7 mm thick, reconstructed every 3.5 mm. The
@@ -272,8 +272,7 @@ python -m src.pipeline.runner configs/experiments/check_oreo_box.yaml
 The algorithm runs `experiment.repetitions` times from the same seed, and the
 runner reports the run times and whether the repetitions agreed. When the
 spacing of the reference mask differs from the prediction, the reference is
-resampled onto the grid of the prediction before the metrics are computed. It also
-warns when the reference looks mirrored against the scan (`alignment` in `metrics.json`).
+resampled onto the grid of the prediction before the metrics are computed.
 
 ## Mesh reconstruction
 
@@ -285,6 +284,7 @@ Meshes built from the three reference masks in `data/reference_masks/`
 (Bluefin Tuna, Gadus Morhua, Oreo fish):
 
 <img src="docs/images/reference_meshes.png" alt="Swim bladder meshes reconstructed from the reference masks" width="560">
+
 
 ## 📁 Project Structure
 
@@ -320,10 +320,10 @@ Meshes built from the three reference masks in `data/reference_masks/`
 │   │   ├── volume.py                 # unified Volume (dataclass) representation
 │   │   ├── loaders.py                # DICOM, TIFF & JSON loaders
 │   │   └── preprocessor.py           # normalization, resampling & denoising
-│   ├── models/                       # Segmentation models
-│   │   ├── analytical.py
-│   │   ├── unet.py
-│   │   └── foundation/
+│   ├── models/                       # Segmentation models 
+│   │   ├── analytical.py             
+│   │   ├── unet.py                   
+│   │   └── foundation/               
 │   └── pipeline/                     # reconstruction, metrics & experiments
 │       ├── mesh.py                   # Marching Cubes + smoothing + decimation
 │       ├── metrics.py                # Dice, IoU, HD95, ASSD & VS
@@ -334,5 +334,4 @@ Meshes built from the three reference masks in `data/reference_masks/`
 ├── LICENSE
 └── README.md
 ```
-
 ---

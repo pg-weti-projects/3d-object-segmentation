@@ -92,10 +92,7 @@ ALGORITHM_FIELDS: dict[str, list[tuple[str, str, str]]] = {
     ],
     SAM_MED3D: [
         ("threshold", "Mask threshold (0-1)", "number"),
-        ("padding", "Padding of the cube", "choice"),
         ("intensity_shift", "Intensity shift (a number or auto)", "text"),
-        ("context", "Cube beyond the box", "choice"),
-        ("spacing", "Cube voxel size", "choice"),
     ],
 }
 
@@ -196,24 +193,11 @@ FIELD_HELP: dict[str, dict[str, str]] = {
             "Cut-off on the model's probability: lower gives a larger mask, higher a smaller one. 0.5 is "
             "what the model was trained with."
         ),
-        "padding": (
-            "What fills the cube where it reaches past the scan (and past the box with 'Cube beyond the "
-            "box' = box): '0' as the model was trained, 'minimum' the lowest scan value in the cube."
-        ),
         "intensity_shift": (
             "Added to every value before the model's normalisation, which only uses values above 0. 'auto' "
             "(default) finds air and tissue in the box (Otsu) and puts 0 where HU has it, but only when "
             "almost nothing in the box is below 0 (e.g. mass density, Gadus); HU scans are left as they are. "
             "A number sets the shift yourself; 0 keeps the scan as it is."
-        ),
-        "context": (
-            "What fills the cube where it reaches past the box: 'scan' (default) shows the scan around the "
-            "box, as the model saw whole scans in training; 'box' pads it with the padding value. The mask "
-            "is kept inside the box either way."
-        ),
-        "spacing": (
-            "'box' scales the cube so that the box's longest side fills it; 'trained' keeps the 1.5 mm the "
-            "model was trained at, and scales only a box longer than 192 mm."
         ),
     },
 }
@@ -226,16 +210,12 @@ FIELD_CHOICES: dict[str, tuple[str, ...]] = {
     "data_term_sign": ("paper", "chan_vese"),
     "init_anchor": ("corner", "center"),
     "init_from": INIT_CHOICES,
-    "padding": ("0", "minimum"),
-    "context": sam_med3d.pipeline.CONTEXTS,
-    "spacing": sam_med3d.pipeline.SPACINGS,
 }
 
 
 def algorithm_defaults(name: str) -> dict[str, Any]:
     if name == SAM_MED3D:
-        defaults = {key: sam_med3d.pipeline.DEFAULT_PARAMETERS[key] for key, _label, _kind in ALGORITHM_FIELDS[SAM_MED3D]}
-        return {**defaults, "padding": "0" if defaults["padding"] == 0 else str(defaults["padding"])}
+        return {key: sam_med3d.pipeline.DEFAULT_PARAMETERS[key] for key, _label, _kind in ALGORITHM_FIELDS[SAM_MED3D]}
     if name == BOX_REGION:
         return {key: box_region.DEFAULT_PARAMETERS[key] for key, _label, _kind in ALGORITHM_FIELDS[BOX_REGION]}
     return dict(DEFAULT_PARAMS) if name == CHAN_VESE else dict(ALGORITHM_DEFAULTS[name])
@@ -370,8 +350,6 @@ def algorithm_config(form: Mapping[str, str]) -> AlgorithmConfig:
         if not isinstance(extra, dict):
             raise ValueError("Advanced parameters must be a JSON object.")
         parameters.update(extra)
-    if name == SAM_MED3D and parameters.get("padding") == "0":
-        parameters["padding"] = 0.0  # the choice is text; the method takes a number or "minimum"
     shift = parameters.get("intensity_shift") if name == SAM_MED3D else None
     if isinstance(shift, str) and shift.strip().lower() != sam_med3d.pipeline.AUTO:
         try:
@@ -526,13 +504,9 @@ def run_segmentation(form: Mapping[str, str], store_dir: Path) -> dict[str, Any]
         local_mask = box_region.segment(target, {**algorithm.parameters, "seed_zyx": local_seed})
         status, warnings, n_warnings = ("ok" if local_mask.any() else "empty"), [], 0
     elif algorithm.name == SAM_MED3D:
-        # the same function and parameters as the CLI (runner): the box's contents and the click in them,
-        # or with context "scan" the whole volume, the box and the click in it
-        if sam_med3d.pipeline.takes_scan(algorithm.parameters):
-            box_zyx = [[w.start, w.stop] for w in where]
-            local_mask = sam_med3d.segment(volume, {**algorithm.parameters, "seed_zyx": list(seed), "box_zyx": box_zyx})
-        else:
-            local_mask = sam_med3d.segment(target, {**algorithm.parameters, "seed_zyx": list(local_seed)})
+        # the same function and parameters as the CLI (runner): the whole volume, the box and the click
+        box_zyx = [[w.start, w.stop] for w in where]
+        local_mask = sam_med3d.segment(volume, {**algorithm.parameters, "seed_zyx": list(seed), "box_zyx": box_zyx})
         report = local_mask.report
         status = "ok" if np.asarray(local_mask).any() else "empty"
         warnings = [
@@ -559,7 +533,7 @@ def run_segmentation(form: Mapping[str, str], store_dir: Path) -> dict[str, Any]
         n_warnings = int(result.params_used.get("n_warnings", len(warnings)))
         measured = measured_contrast(result.params_used)
     elapsed = time.perf_counter() - start
-    whole = np.asarray(local_mask).shape == tuple(volume.shape)  # SAM-Med3D with context "scan"
+    whole = algorithm.name == SAM_MED3D  # its mask is on the whole volume already
     mask = restore_mask(local_mask, volume.shape, where) if where is not None and not whole else np.asarray(local_mask)
 
     voxel_mm3 = float(np.prod(volume.spacing_mm))

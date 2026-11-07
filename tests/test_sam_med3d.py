@@ -114,7 +114,7 @@ def test_the_cubes_edges_never_blend_into_padding():
     values, inside = geometry.sample(data, (1.0, 1.0, 1.0), cube)
     assert np.all(values[inside] == 100.0)  # no value between the scan and anything else
     assert np.all(values[~inside] == 0.0)
-    prepared, _ = pipeline.prepare(values + inside * np.arange(SIZE**3).reshape((SIZE,) * 3) % 7, inside, _params(padding=-50.0))
+    prepared, _ = pipeline.prepare(values + inside * np.arange(SIZE**3).reshape((SIZE,) * 3) % 7, inside)
     assert len(np.unique(prepared[~inside])) == 1
 
 
@@ -166,16 +166,12 @@ def test_shrinking_smooths_first_and_leaves_axes_that_are_not_shrunk_alone():
 # --- normalisation -------------------------------------------------------------------------------
 
 
-def _params(**overrides):
-    return {"clamp": None, "intensity_shift": 0.0, "padding": 0.0, **overrides}
-
-
 def test_the_z_score_uses_voxels_above_0_with_an_unbiased_std():
     values = np.zeros((SIZE, SIZE, SIZE), np.float32)
     values[:10] = -1000.0
     values[10:20] = 50.0
     values[20:30] = 150.0
-    prepared, report = pipeline.prepare(values, np.ones(values.shape, bool), _params())
+    prepared, report = pipeline.prepare(values, np.ones(values.shape, bool))
     above = values[values > 0]
     assert report["mean"] == pytest.approx(above.mean())
     assert report["std"] == pytest.approx(above.std(ddof=1))
@@ -186,54 +182,42 @@ def test_the_z_score_uses_voxels_above_0_with_an_unbiased_std():
 def test_a_scan_above_0_everywhere_is_reported_not_changed():
     values = np.full((SIZE, SIZE, SIZE), 3815.0, np.float32)
     values[20:40] = 18000.0
-    _, report = pipeline.prepare(values, np.ones(values.shape, bool), _params())
+    _, report = pipeline.prepare(values, np.ones(values.shape, bool))
     assert report["air_is_above_0"] is True
     assert report["share_of_scan_voxels_above_0"] == 1.0
     assert report["mean"] > 3815
 
 
-def test_conversions_are_explicit_and_applied_in_order():
+def test_the_shift_applies_to_the_scan_and_padding_stays_0():
     values = np.full((SIZE, SIZE, SIZE), 3815.0, np.float32)
-    values[20:40] = 18000.0  # clamped to 10000, then shifted to 6185
+    values[20:40] = 9815.0  # shifted to 6000
     values[50:60] = 5815.0  # shifted to 2000
     inside = np.ones(values.shape, bool)
     inside[:5] = False
-    prepared, report = pipeline.prepare(values, inside, _params(clamp=[0.0, 10000.0], intensity_shift=-3815.0))
-    assert report["scan_minimum_in_cube"] == 0.0
-    assert report["air_is_above_0"] is False
-    assert report["padding_value"] == 0.0
-    assert report["mean"] == pytest.approx((20 * 6185.0 + 10 * 2000.0) / 30)
-
-
-def test_padding_can_be_the_lowest_scan_value():
-    values = np.full((SIZE, SIZE, SIZE), 500.0, np.float32)
-    values[30:40] = 900.0
-    inside = np.zeros(values.shape, bool)
-    inside[20:60] = True
-    _, report = pipeline.prepare(values, inside, _params(padding="minimum"))
-    assert report["padding_value"] == 500.0
+    prepared, report = pipeline.prepare(values, inside, -3815.0)
+    assert report["scan_minimum_in_cube"] == 0.0 and report["air_is_above_0"] is False
+    assert report["mean"] == pytest.approx((20 * 6000.0 + 10 * 2000.0) / 30)
+    assert prepared[0, 0, 0] == pytest.approx(-report["mean"] / report["std"])  # padding 0, normalised
 
 
 @pytest.mark.parametrize("fill", [0.0, -5.0, 7.0])
 def test_a_flat_or_empty_cube_is_a_clear_error(fill):
     with pytest.raises(ValueError, match="above 0|one value"):
-        pipeline.prepare(np.full((SIZE, SIZE, SIZE), fill, np.float32), np.ones((SIZE, SIZE, SIZE), bool), _params())
+        pipeline.prepare(np.full((SIZE, SIZE, SIZE), fill, np.float32), np.ones((SIZE, SIZE, SIZE), bool))
 
 
 # --- segment -------------------------------------------------------------------------------------
 
 
-# The runner crops the scan to the box; segment() is given only the box's contents, here volume().
+# Without box_zyx the whole volume given is the box, here volume().
 
 
-def test_a_mask_comes_back_on_the_grid_of_the_box_it_was_given(fake):
+def test_a_mask_comes_back_on_the_grid_of_the_volume_it_was_given(fake):
     scan = volume()  # 120 x 140 x 160 mm
     mask = segment(scan, {"seed_zyx": [30, 35, 40]})
     assert np.asarray(mask).shape == scan.shape
     assert mask[30, 35, 40] == 1
     assert mask.report["spacing_mm"] == pytest.approx(160 / 128)
-    assert mask.report["view_mm"] == {"min_zyx": [0.0, 0.0, 0.0], "max_zyx": [120.0, 140.0, 160.0]}
-    assert mask.report["post_processing"] is None
     assert mask.report["box_faces_reached"] == []
     assert not any("cut off" in warning for warning in mask.report["warnings"])
 
@@ -310,10 +294,13 @@ def test_a_scan_above_0_warns_when_it_is_not_shifted(fake):
         ({}, "needs a click"),
         ({"seed_zyx": [999, 1, 1]}, "outside the volume"),
         ({"seed_zyx": [1, 1, 1], "threshold": 2}, "between 0 and 1"),
-        ({"seed_zyx": [1, 1, 1], "padding": "mean"}, "padding"),
-        ({"seed_zyx": [1, 1, 1], "clamp": [5, 1]}, "low < high"),
-        # the runner crops to the box, so the method takes none; closed options are refused like any unknown name
+        ({"seed_zyx": [1, 1, 1], "intensity_shift": "half"}, "intensity_shift"),
+        ({"seed_zyx": [1, 1, 1], "box_zyx": [[0, 99], [0, 5], [0, 5]]}, "does not fit"),
+        # the runner gives the box as box_zyx, in voxels; options that were tried and dropped are refused
         ({"seed_zyx": [1, 1, 1], "box": {"min_mm": [0, 0, 0], "max_mm": [9, 9, 9]}}, "unknown sam_med3d parameters"),
+        ({"seed_zyx": [1, 1, 1], "padding": 0.0}, "unknown sam_med3d parameters"),
+        ({"seed_zyx": [1, 1, 1], "clamp": [5, 10]}, "unknown sam_med3d parameters"),
+        ({"seed_zyx": [1, 1, 1], "context": "box"}, "unknown sam_med3d parameters"),
         ({"seed_zyx": [1, 1, 1], "box_margin": 0.25}, "unknown sam_med3d parameters"),
         ({"seed_zyx": [1, 1, 1], "cube": "click"}, "unknown sam_med3d parameters"),
         ({"seed_zyx": [1, 1, 1], "spacing_mm": 1.5}, "unknown sam_med3d parameters"),
@@ -420,34 +407,26 @@ def _config(tmp_path, *, box=None, seed=(30, 35, 40), shape=(60, 70, 80), target
 BOX = {"min_mm": [40.0, 40.0, 40.0], "max_mm": [100.0, 100.0, 100.0]}
 
 
-def test_the_runner_keeps_the_mask_in_the_box(tmp_path, fake):
+def test_the_runner_gives_the_whole_scan_and_keeps_the_mask_in_the_box(tmp_path, fake):
     result = run_experiment(_config(tmp_path, box=BOX))  # 60 mm a side: voxels 20-49 of each axis
     directory = tmp_path / "results" / "exp"
     for name in ("config.yaml", "mask.nii.gz", "mesh.glb", "metrics.json", "run.log", "method_report.json"):
         assert (directory / name).is_file(), name
     assert result.box_prompted is True
-    report = result.metrics["method_report"]
+    report = json.loads((directory / "method_report.json").read_text(encoding="utf-8"))
     assert report["box_extent_mm_zyx"] == [60.0, 60.0, 60.0]
     assert report["spacing_mm"] == pytest.approx(60 / 128)
-    assert report["padding_share_of_cube"] == pytest.approx(0.0)
-    assert result.mask[30, 35, 40] == 1  # the seed is given in the scan's voxels; the runner moves it into the box
+    assert report["padding_share_of_cube"] == pytest.approx(0.0)  # the scan around the box fills the cube
+    assert result.mask[30, 35, 40] == 1  # the seed stays in the scan's voxels
     assert result.mask.shape == volume().shape
     assert not result.mask[:20].any() and not result.mask[50:].any()
-    assert result.metrics["reference_share_in_view"] == 1.0
+    direct = segment(volume(), {"seed_zyx": [30, 35, 40], "box_zyx": [[20, 50]] * 3})
+    assert np.array_equal(result.mask, np.asarray(direct))
 
 
 def test_the_runner_refuses_a_run_without_a_box(tmp_path, fake, capsys):
     assert runner_main([str(_config(tmp_path))]) == 1
     assert "needs a box" in capsys.readouterr().err
-
-
-def test_the_runner_reports_a_reference_that_does_not_fit_in_the_box(tmp_path, fake):
-    # the reference is 400 mm long, against a box of 128 mm; the cube's padding beyond the box does not count
-    box = {"min_mm": [136.0, 28.0, 28.0], "max_mm": [264.0, 52.0, 52.0]}
-    path = _config(tmp_path, box=box, seed=(100, 20, 20), shape=(200, 40, 40), target=(slice(0, 200), slice(15, 25), slice(15, 25)))
-    result = run_experiment(path)
-    assert result.metrics["reference_share_in_view"] == pytest.approx(64 / 200)
-    assert any("of the reference mask lies outside" in warning for warning in result.warnings)
 
 
 def test_a_method_that_is_not_installed_fails_with_a_readable_message(tmp_path, monkeypatch, capsys):
@@ -481,36 +460,16 @@ def test_methods_without_a_report_still_crop_to_the_box(tmp_path):
     assert ndi.label(result.mask)[1] == 1
 
 
-# --- closer to training: scan context, trained spacing, automatic shift ----------------------------
+# --- the box, the scan around it, and the automatic shift ----------------------------------------
 
-def test_a_box_given_as_box_zyx_gives_the_cropped_runs_mask(fake):
-    scan = volume()
-    box = (slice(10, 50), slice(10, 60), slice(15, 65))
-    cropped = Volume(np.ascontiguousarray(scan.data[box]), scan.spacing_mm, "HU", "dicom", "0" * 64)
-    local = segment(cropped, {"seed_zyx": [20, 25, 25], **pipeline.PADDED_NO_SHIFT})
-    whole = segment(scan, {"seed_zyx": [30, 35, 40], "box_zyx": [[w.start, w.stop] for w in box], **pipeline.PADDED_NO_SHIFT})
-    restored = np.zeros(scan.shape, np.uint8)
-    restored[box] = local
-    assert np.array_equal(whole, restored) and np.array_equal(fake.cubes[0], fake.cubes[-1]) and len(fake.cubes) == 1
-
-
-def test_context_scan_fills_the_cube_with_the_scan_and_keeps_the_mask_in_the_box(fake, monkeypatch):
+def test_the_scan_around_the_box_fills_the_cube_and_the_mask_stays_in_the_box(fake, monkeypatch):
     monkeypatch.setattr(FakeNetwork, "predict", lambda self, embedding, click: np.ones((SIZE,) * 3, np.float32))
     scan = volume(shape=(100, 100, 100))
     box = [[40, 60], [30, 70], [45, 55]]  # 40 x 80 x 20 mm, cube 80 mm: inside the 200 mm scan
-    mask = segment(scan, {"seed_zyx": [50, 50, 50], "box_zyx": box, "context": "scan"})
-    assert mask.report["padding_share_of_cube"] == 0.0 and mask.report["view_mm"]["min_zyx"] == [80.0, 60.0, 90.0]
+    mask = segment(scan, {"seed_zyx": [50, 50, 50], "box_zyx": box})
+    assert mask.report["padding_share_of_cube"] == 0.0 and mask.report["spacing_mm"] == pytest.approx(80 / 128)
     assert int(mask.sum()) == 20 * 40 * 10 and mask[40:60, 30:70, 45:55].all()
     assert (fake.cubes[-1] != fake.cubes[-1][0, 0, 0]).mean() > 0.99  # scan everywhere, no constant padding
-    padded = segment(scan, {"seed_zyx": [50, 50, 50], "box_zyx": box, "context": "box"})
-    assert padded.report["padding_share_of_cube"] == pytest.approx(1 - 40 * 80 * 20 / 80**3)
-
-
-def test_trained_spacing_is_kept_unless_the_box_is_longer_than_the_cube(fake):
-    small = segment(volume(), {"seed_zyx": [30, 35, 40], "spacing": "trained"}).report  # 160 mm box
-    assert small["spacing_mm"] == 1.5 and small["side_mm"] == 192
-    long = segment(volume(shape=(150, 20, 20)), {"seed_zyx": [70, 10, 10], "spacing": "trained"}).report  # 300 mm
-    assert long["spacing_mm"] == pytest.approx(300 / 128)
 
 
 def test_the_automatic_shift_follows_its_rule_and_leaves_hu_alone():
@@ -533,14 +492,3 @@ def test_the_automatic_shift_is_reported_and_used(fake):
     assert report["intensity_shift_rule"]["air"] == 5.0
     assert report["normalisation"]["intensity_shift"] == report["intensity_shift_rule"]["shift"] < 0
     assert not report["normalisation"]["air_is_above_0"]
-
-
-def test_the_runner_gives_the_whole_scan_for_context_scan(tmp_path, fake):
-    path = _config(tmp_path, box=BOX)
-    config = yaml.safe_load(path.read_text())
-    config["algorithm"]["parameters"] = {"context": "scan", "spacing": "trained"}
-    path.write_text(yaml.safe_dump(config))
-    result = run_experiment(path)
-    direct = segment(volume(), {"seed_zyx": [30, 35, 40], "box_zyx": [[20, 50]] * 3, "context": "scan", "spacing": "trained"})
-    assert np.array_equal(result.mask, np.asarray(direct)) and result.mask[30, 35, 40] == 1
-    assert result.metrics["method_report"]["context"] == "scan" and result.metrics["reference_share_in_view"] == 1.0

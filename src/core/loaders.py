@@ -243,17 +243,8 @@ def _series_spacing(datasets: list[Any]) -> tuple[float, float, float]:
 
 
 def _slice_position(dataset: Any) -> float:
-    """Where a slice lies along the normal of its plane, which is what orders a series.
-    Plain z gives the same order unless the normal points to -z, as in the Bluefin tuna;
-    there it reverses the series and leaves it mirrored against its reference mask."""
     position = getattr(dataset, "ImagePositionPatient", None)
-    if position is None:
-        return float(getattr(dataset, "InstanceNumber", 0))
-    orientation = getattr(dataset, "ImageOrientationPatient", None)
-    if orientation is None or len(orientation) != 6:
-        return float(position[2])
-    values = [float(value) for value in orientation]
-    return float(np.dot(np.cross(values[:3], values[3:]), [float(value) for value in position]))
+    return float(position[2]) if position is not None else float(getattr(dataset, "InstanceNumber", 0))
 
 
 def _as_volume_array(values: Any) -> np.ndarray:

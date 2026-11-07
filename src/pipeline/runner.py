@@ -17,7 +17,6 @@ from src.core.loaders import load_volume
 from src.core.preprocessor import PreprocessingConfig, preprocess
 from src.core.box import crop_volume, restore_mask
 from src.core.volume import Volume
-from src.pipeline.alignment import OK as ALIGNED, check_alignment
 from src.pipeline.experiment import (
     ExperimentConfig,
     load_experiment_config,
@@ -117,12 +116,11 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
 
     where = None
     model_input = volume
+    parameters = dict(config.algorithm.parameters)
     if config.data.box is None and getattr(segment, "needs_box", False):
         raise RunnerError(f"'{config.algorithm.name}' needs a box (data.box) around the target, and none was given.")
-    parameters = dict(config.algorithm.parameters)
-    takes_scan = getattr(segment, "takes_scan", None)
-    if config.data.box is not None and takes_scan is not None and takes_scan(parameters):
-        # the method looks past the box (SAM-Med3D's context "scan"): it gets the whole scan and the box
+    if config.data.box is not None and getattr(segment, "takes_box", False):
+        # the method looks past the box (SAM-Med3D): it gets the whole scan and the box, in voxels
         box_where = config.data.box.slices(volume.shape, volume.spacing_mm)
         parameters["box_zyx"] = [[w.start, w.stop] for w in box_where]
         logger.info("box: %s voxels; the method sees the scan around it and keeps its mask inside it", parameters["box_zyx"])
@@ -193,22 +191,6 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
         result.metrics = compute_metrics(mask, on_grid, volume.spacing_mm)
         result.metrics["box_prompted"] = result.box_prompted
         result.metrics["runtime_s"] = float(np.median(runtimes))
-        result.metrics["alignment"] = check_alignment(volume.data, on_grid, volume.spacing_mm)
-        if result.metrics["alignment"]["status"] != ALIGNED:
-            result.warnings.append(result.metrics["alignment"]["message"])
-            logger.warning(result.warnings[-1])
-        if method_report:
-            result.metrics["method_report"] = method_report
-            if "view_mm" in method_report:
-                view = _view_on_scan(method_report["view_mm"], where, volume.spacing_mm)
-                share = share_in_view(on_grid, volume.spacing_mm, view)
-                result.metrics["reference_share_in_view"] = share
-                if share < 1:
-                    result.warnings.append(
-                        f"{100 * (1 - share):.1f}% of the reference mask lies outside what the method can see, "
-                        f"so Dice cannot exceed {2 * share / (1 + share):.3f}."
-                    )
-                    logger.warning(result.warnings[-1])
         write_metrics_json(result.metrics, result_dir / "metrics.json")
         logger.info("dice %.3f, hd95 %s mm", result.metrics["dice"], result.metrics["hd95_mm"])
 
@@ -236,30 +218,6 @@ def match_grid(
     result = reference[np.ix_(*indices)]
     in_z, in_y, in_x = inside
     return result & in_z[:, None, None] & in_y[None, :, None] & in_x[None, None, :]
-
-
-def _view_on_scan(view_mm: dict, where, spacing: tuple[float, float, float]) -> dict:
-    """A method reports what it saw in the coordinates of the volume it was given. After a crop that
-    is the box: shift it back onto the scan, and keep it inside the box, since nothing else reached it."""
-    if where is None:
-        return view_mm
-    low = [w.start * s for w, s in zip(where, spacing)]
-    high = [w.stop * s for w, s in zip(where, spacing)]
-    return {
-        "min_zyx": [max(v + o, o) for v, o in zip(view_mm["min_zyx"], low)],
-        "max_zyx": [min(v + o, h) for v, o, h in zip(view_mm["max_zyx"], low, high)],
-    }
-
-
-def share_in_view(reference: np.ndarray, spacing: tuple[float, float, float], view_mm: dict) -> float:
-    """The share of the reference inside the region a method could see. Only for reporting: the
-    reference never reaches the method."""
-    inside = []
-    for size, step, low, high in zip(reference.shape, spacing, view_mm["min_zyx"], view_mm["max_zyx"]):
-        centres = (np.arange(size) + 0.5) * step
-        inside.append((centres >= low) & (centres < high))
-    total = int(np.count_nonzero(reference))
-    return float(np.count_nonzero(reference[np.ix_(*inside)])) / total if total else 1.0
 
 
 def _load_reference(path: str | Path) -> tuple[np.ndarray, tuple[float, float, float]]:

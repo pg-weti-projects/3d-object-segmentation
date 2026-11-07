@@ -74,3 +74,39 @@ def test_a_tuned_set_of_the_standard_parts_gives_the_standard_result(tmp_path, m
     assert tuned is not standard and tuned.weights_sha256 == digest and standard.weights_sha256 == assets.WEIGHTS_SHA256
     cube_xyz = np.random.default_rng(1).normal(size=(geometry.SIZE,) * 3).astype(np.float32)
     assert np.array_equal(standard.predict(standard.embed(cube_xyz), (60, 64, 70)), tuned.predict(tuned.embed(cube_xyz), (60, 64, 70)))
+
+
+def test_a_few_decoder_steps_make_a_tuned_set_that_loads_as_trained(tmp_path, monkeypatch):
+    """Fine-tuning end to end on a tiny synthetic fish: cubes encoded and cached, three decoder steps,
+    the image encoder unchanged, the set saved and checked, and loaded over the standard weights it gives
+    the trained decoder's prediction."""
+    import torch
+
+    from src.models.foundation.sam_med3d import finetune
+    from tests.test_sam_med3d_finetune import fish
+
+    located = assets.require()
+    net = network.SamMed3D(located.source, located.weights)
+    files = finetune.encode(fish(), "real", 2, net, tmp_path / "cache")
+    encoder_before = {key: value.clone() for key, value in net.model.image_encoder.state_dict().items()}
+    decoder_before = network.tuned_state(net.model)
+    monkeypatch.setattr(finetune, "LOG_EVERY", 1)
+    history = finetune.train(files, net, {**finetune.RECIPE, "steps": 3, "batch": 2})
+    assert len(history) == 3 and all(np.isfinite(entry["loss"]) for entry in history)
+    assert all(torch.equal(value, net.model.image_encoder.state_dict()[key]) for key, value in encoder_before.items())
+    after = network.tuned_state(net.model)
+    assert any(not torch.equal(after[key], decoder_before[key]) for key in after)
+
+    monkeypatch.setattr(assets, "tuned_folder", lambda name: tmp_path / "finetuned" / name)
+    finetune.save_tuned("tiny", net, {"trained_on": ["test-fish"]})
+    _, manifest = assets.require_tuned("tiny")
+    assert manifest["trained_on"] == ["test-fish"] and manifest["base_weights_sha256"] == assets.WEIGHTS_SHA256
+    with pytest.raises(FileExistsError):
+        finetune.save_tuned("tiny", net, {})
+
+    monkeypatch.setattr(network, "_loaded", {})
+    tuned = network.get_network(weights="tiny")
+    sample = finetune.load_sample(files[0])
+    click = finetune.click_from_target(sample["target"], np.random.default_rng(0))
+    embedding = torch.from_numpy(sample["embedding"])
+    assert np.allclose(net.predict(embedding, click), tuned.predict(embedding, click), atol=1e-6)

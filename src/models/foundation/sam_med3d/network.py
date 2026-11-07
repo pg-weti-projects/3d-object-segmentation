@@ -92,7 +92,7 @@ class SamMed3D:
 
 def tuned_state(model) -> dict[str, Any]:
     """The parts fine-tuning changes, as saved in a tuned set."""
-    return {key: value.detach().cpu() for key, value in model.state_dict().items() if key.startswith(TUNED_PARTS)}
+    return {key: value.detach().cpu().clone() for key, value in model.state_dict().items() if key.startswith(TUNED_PARTS)}
 
 
 def load_tuned(model, state: dict[str, Any]) -> None:

@@ -43,8 +43,14 @@ class FakeNetwork:
 @pytest.fixture
 def fake(monkeypatch):
     net = FakeNetwork()
+    net.weights = []  # the weights each call asked for
     cached = network.CachedEncoder(net)
-    monkeypatch.setattr(network, "get_network", lambda device="cpu", threads=None: cached)
+
+    def get_network(device="cpu", threads=None, weights=assets.STANDARD):
+        net.weights.append(weights)
+        return cached
+
+    monkeypatch.setattr(network, "get_network", get_network)
     return net
 
 
@@ -305,6 +311,8 @@ def test_a_scan_above_0_warns_when_it_is_not_shifted(fake):
         ({"seed_zyx": [1, 1, 1], "cube": "click"}, "unknown sam_med3d parameters"),
         ({"seed_zyx": [1, 1, 1], "spacing_mm": 1.5}, "unknown sam_med3d parameters"),
         ({"seed_zyx": [1, 1, 1], "sliding_window": True}, "unknown sam_med3d parameters"),
+        ({"seed_zyx": [1, 1, 1], "weights": 3}, "weights=3"),
+        ({"seed_zyx": [1, 1, 1], "weights": " "}, "weights"),
     ],
 )
 def test_wrong_parameters_are_clear_errors(fake, parameters, message):
@@ -492,3 +500,78 @@ def test_the_automatic_shift_is_reported_and_used(fake):
     assert report["intensity_shift_rule"]["air"] == 5.0
     assert report["normalisation"]["intensity_shift"] == report["intensity_shift_rule"]["shift"] < 0
     assert not report["normalisation"]["air_is_above_0"]
+
+
+# --- fine-tuned weights --------------------------------------------------------------------------
+
+
+def tuned_set(root, name, payload=b"tuned parts", base=assets.WEIGHTS_SHA256):
+    """A tuned set as scripts/finetune_sam_med3d.py writes it; the file's content is not read here."""
+    import hashlib
+
+    folder = root / assets.TUNED_DIR / name
+    folder.mkdir(parents=True)
+    (folder / assets.TUNED_FILE).write_bytes(payload)
+    manifest = {"base_weights_sha256": base, "sha256": hashlib.sha256(payload).hexdigest(), "trained_on": ["oreo"]}
+    (folder / assets.TUNED_MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
+    return folder
+
+
+def test_a_tuned_set_is_found_by_its_name_and_checked(tmp_path, monkeypatch):
+    monkeypatch.setenv(assets.ASSETS_VARIABLE, str(tmp_path))
+    assert assets.tuned_names() == []
+    tuned_set(tmp_path, "s1-oreo")
+    (tmp_path / assets.TUNED_DIR / "no-manifest").mkdir()
+    assert assets.tuned_names() == ["s1-oreo"]
+    weights, manifest = assets.require_tuned("s1-oreo")
+    assert weights == tmp_path / assets.TUNED_DIR / "s1-oreo" / assets.TUNED_FILE and manifest["trained_on"] == ["oreo"]
+
+
+@pytest.mark.parametrize(
+    "name, damage, message",
+    [
+        ("lofo-test-tuna", None, r"No tuned SAM-Med3D weights 'lofo-test-tuna'.*installed: s1-oreo"),
+        ("s1-oreo", "changed", "have SHA-256"),
+        ("s1-oreo", "other base", "other base weights"),
+        ("../s1-oreo", None, "expected 'standard'"),
+    ],
+)
+def test_a_missing_changed_or_foreign_tuned_set_is_refused(tmp_path, monkeypatch, name, damage, message):
+    monkeypatch.setenv(assets.ASSETS_VARIABLE, str(tmp_path))
+    folder = tuned_set(tmp_path, "s1-oreo", base="0" * 64 if damage == "other base" else assets.WEIGHTS_SHA256)
+    if damage == "changed":
+        (folder / assets.TUNED_FILE).write_bytes(b"changed after training")
+    with pytest.raises(assets.NotInstalledError, match=message):
+        assets.require_tuned(name)
+
+
+def test_the_weights_reach_the_network_and_every_report_names_them(fake):
+    click = {"seed_zyx": [30, 35, 40], "box_zyx": [[10, 50], [10, 60], [15, 65]]}
+    standard = segment(volume(), click).report
+    tuned = segment(volume(), {**click, "weights": "s1-oreo"}).report
+    assert fake.weights == [assets.STANDARD, "s1-oreo"]
+    assert standard["weights"] == assets.STANDARD and tuned["weights"] == "s1-oreo"
+
+
+class _Parts:
+    """Stands in for the torch model: a state dict of the three parts."""
+
+    def __init__(self):
+        self.state = {"image_encoder.w": 0, "prompt_encoder.w": 1, "mask_decoder.w": 2}
+
+    def state_dict(self):
+        return dict(self.state)
+
+    def load_state_dict(self, state, strict=True):
+        assert strict is False
+        self.state.update(state)
+
+
+def test_a_tuned_set_replaces_the_prompt_encoder_and_decoder_and_nothing_else():
+    model = _Parts()
+    network.load_tuned(model, {"prompt_encoder.w": 10, "mask_decoder.w": 20})
+    assert model.state == {"image_encoder.w": 0, "prompt_encoder.w": 10, "mask_decoder.w": 20}
+    with pytest.raises(ValueError, match="missing"):
+        network.load_tuned(_Parts(), {"mask_decoder.w": 20})
+    with pytest.raises(ValueError, match="extra"):
+        network.load_tuned(_Parts(), {"prompt_encoder.w": 10, "mask_decoder.w": 20, "image_encoder.w": 30})

@@ -41,6 +41,7 @@ DEFAULT_PARAMETERS: dict[str, Any] = {
     "box_zyx": None,  # [[start, stop]] x 3, voxels of the box in the volume given; None = all of it
     "threshold": 0.5,  # on the sigmoid, as upstream
     "intensity_shift": AUTO,  # added to the scan before the z-score: a number, or "auto" (`auto_shift`)
+    "weights": assets.STANDARD,  # "standard" (the published model) or the name of a fine-tuned set
     "device": "cpu",
     "threads": None,  # None = torch's default
 }
@@ -74,6 +75,9 @@ def resolve_parameters(parameters: Mapping[str, Any] | None) -> dict[str, Any]:
     threshold = _number(params["threshold"], "threshold")
     if not 0 < threshold < 1:
         raise ValueError(f"threshold={threshold!r}: expected a number between 0 and 1")
+    if not isinstance(params["weights"], str) or not params["weights"].strip():
+        raise ValueError(f"weights={params['weights']!r}: expected '{assets.STANDARD}' or the name of a tuned set")
+    params["weights"] = params["weights"].strip()
     return params
 
 
@@ -170,7 +174,7 @@ def segment(volume: Volume, parameters: Mapping[str, Any] | None = None) -> Mask
     values, inside = geometry.sample(smoothed, spacing, local_cube)
     del smoothed
     prepared, normalisation = prepare(values, inside, shift)
-    net = network.get_network(str(params["device"]), params["threads"])
+    net = network.get_network(str(params["device"]), params["threads"], params["weights"])
     embedding = net.embed(geometry.to_network_axes(prepared))
     probability = geometry.to_network_axes(net.predict(embedding, click_xyz))
     cube_mask = probability > float(params["threshold"])
@@ -189,6 +193,8 @@ def segment(volume: Volume, parameters: Mapping[str, Any] | None = None) -> Mask
         "click_mm_zyx": list(click_mm),
         "click_in_cube_xyz": list(click_xyz),
         "threshold": float(params["threshold"]),
+        "weights": params["weights"],
+        "weights_sha256": getattr(net, "weights_sha256", None),
         "encoder_output_reused": bool(getattr(net, "last_was_cached", False)),
         "normalisation": normalisation,
         "intensity_shift_rule": shift_rule,

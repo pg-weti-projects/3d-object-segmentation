@@ -29,7 +29,7 @@ SEED = (30, 35, 40)
 def fake(monkeypatch):
     net = FakeNetwork()
     cached = network.CachedEncoder(net)
-    monkeypatch.setattr(network, "get_network", lambda device="cpu", threads=None: cached)
+    monkeypatch.setattr(network, "get_network", lambda device="cpu", threads=None, weights="standard": cached)
     return net
 
 
@@ -60,7 +60,7 @@ def run(client, page, **extra):
     return client.post("/segment/run", data=data)
 
 
-@pytest.mark.parametrize("fields", [{}, {"sam_med3d__intensity_shift": "-50", "sam_med3d__threshold": "0.4"}])
+@pytest.mark.parametrize("fields", [{}, {"sam_med3d__intensity_shift": "-50", "sam_med3d__threshold": "0.4"}, {"sam_med3d__weights": "s1-oreo"}])
 def test_the_web_gives_the_cli_mask_with_the_same_box_click_and_preprocessing(client, scan_file, fake, tmp_path, fields):
     page = load(client, scan_file, **AS_CLI)
     store = tmp_path / "store"
@@ -77,7 +77,7 @@ def test_the_web_gives_the_cli_mask_with_the_same_box_click_and_preprocessing(cl
     config = {
         "experiment": {"id": "cli", "repetitions": 1},
         "data": {"input_path": str(scan_file), "reference_mask_path": str(tmp_path / "ref.nii.gz"), "seed_zyx": list(SEED), "box": box.to_mapping()},
-        "algorithm": {"name": "sam_med3d", "parameters": {key.split("__")[1]: float(value) for key, value in fields.items()}},
+        "algorithm": {"name": "sam_med3d", "parameters": {key.split("__")[1]: value if key.endswith("weights") else float(value) for key, value in fields.items()}},
         "mesh": {"smoothing_iterations": 0, "output_format": "glb"},
         "output": {"results_dir": str(tmp_path / "results")},
     }
@@ -88,13 +88,15 @@ def test_the_web_gives_the_cli_mask_with_the_same_box_click_and_preprocessing(cl
     # the encoder ran once: the CLI's cube had the same content (the cache is keyed by its hash), and the same click
     assert len(fake.cubes) == 1 and len(fake.clicks) == 2 and fake.clicks[0] == fake.clicks[1]
     assert not any("resampled, clipped or denoised" in warning for warning in web["result"]["warnings"])
+    tuned = [warning for warning in web["result"]["warnings"] if "fine-tuned set" in warning]
+    assert tuned == (["Weights: the fine-tuned set 's1-oreo', not the published model."] if "sam_med3d__weights" in fields else [])
 
 
 def test_the_method_is_listed_with_its_note_and_help(client, scan_file):
     page = load(client, scan_file, **AS_CLI)
     assert 'value="sam_med3d"' in page and "SAM-Med3D" in page
     assert "The first run loads the weights" in page
-    for key in ("threshold", "intensity_shift"):
+    for key in ("threshold", "intensity_shift", "weights"):
         assert f'name="sam_med3d__{key}"' in page and str(escape(segmentation.FIELD_HELP["sam_med3d"][key])) in page
     assert 'name="box_z_from"' in page and 'name="box_z_to"' in page
 

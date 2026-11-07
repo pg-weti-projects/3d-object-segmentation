@@ -52,3 +52,25 @@ def test_another_click_in_the_same_box_reuses_the_encoder_and_gives_a_valid_mask
     second = segment(box_contents(), {"seed_zyx": [15, 21, 17]})
     assert first.report["encoder_output_reused"] is False and second.report["encoder_output_reused"] is True
     assert np.asarray(first).shape == (38, 38, 38)
+
+
+def test_a_tuned_set_of_the_standard_parts_gives_the_standard_result(tmp_path, monkeypatch):
+    """The loading path of tuned weights, end to end: saved, checked, loaded over the standard weights."""
+    import json
+
+    import torch
+
+    standard = network.get_network()
+    folder = tmp_path / "same-as-standard"
+    folder.mkdir()
+    torch.save(network.tuned_state(standard.network.model), folder / assets.TUNED_FILE)
+    digest = assets.sha256_file(folder / assets.TUNED_FILE)
+    manifest = {"base_weights_sha256": assets.WEIGHTS_SHA256, "sha256": digest}
+    (folder / assets.TUNED_MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(assets, "tuned_folder", lambda name: tmp_path / name)
+    monkeypatch.setattr(network, "_loaded", dict(network._loaded))  # the tuned copy is dropped afterwards
+
+    tuned = network.get_network(weights="same-as-standard")
+    assert tuned is not standard and tuned.weights_sha256 == digest and standard.weights_sha256 == assets.WEIGHTS_SHA256
+    cube_xyz = np.random.default_rng(1).normal(size=(geometry.SIZE,) * 3).astype(np.float32)
+    assert np.array_equal(standard.predict(standard.embed(cube_xyz), (60, 64, 70)), tuned.predict(tuned.embed(cube_xyz), (60, 64, 70)))

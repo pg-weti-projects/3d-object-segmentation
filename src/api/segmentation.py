@@ -93,6 +93,7 @@ ALGORITHM_FIELDS: dict[str, list[tuple[str, str, str]]] = {
     SAM_MED3D: [
         ("threshold", "Mask threshold (0-1)", "number"),
         ("intensity_shift", "Intensity shift (a number or auto)", "text"),
+        ("weights", "Weights (standard or a tuned set)", "text"),
     ],
 }
 
@@ -198,6 +199,11 @@ FIELD_HELP: dict[str, dict[str, str]] = {
             "(default) finds air and tissue in the box (Otsu) and puts 0 where HU has it, but only when "
             "almost nothing in the box is below 0 (e.g. mass density, Gadus); HU scans are left as they are. "
             "A number sets the shift yourself; 0 keeps the scan as it is."
+        ),
+        "weights": (
+            "'standard' is the published model. A fine-tuned set is named by its folder in "
+            "sam-med3d-assets/finetuned/ (made by scripts/finetune_sam_med3d.py); its manifest there says "
+            "which fish it was trained on. A set trained on a fish says nothing about how it does on that fish."
         ),
     },
 }
@@ -513,6 +519,8 @@ def run_segmentation(form: Mapping[str, str], store_dir: Path) -> dict[str, Any]
             f"Cube voxel {report['spacing_mm']:.3g} mm ({report['spacing_vs_trained']:.2g} x the 1.5 mm "
             "the model was trained at)."
         ]
+        if report["weights"] != sam_med3d_assets.STANDARD:
+            warnings.append(f"Weights: the fine-tuned set '{report['weights']}', not the published model.")
         if any([pre["target_spacing"], pre["hu_range"], pre["denoise"]]):
             warnings.append(
                 "This volume was resampled, clipped or denoised when it was loaded, so the mask can differ "

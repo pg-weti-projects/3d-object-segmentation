@@ -4,8 +4,8 @@ segment(volume, parameters): one click in a box, one cube, one mask on the volum
 The cube is centred on the user's 3D box and scaled so that the box's longest side fills it; the
 rest of the cube shows the scan around the box, as in training, and the mask is set to 0 outside
 the box. Before the scan is shrunk onto a coarser cube it is smoothed, so that fine detail does not
-alias. The box is never a model prompt. A cube centred on the click alone was tried and dropped: on
-upstream's human CT it scored a median Dice of 0.32 over 15 organs, against the 0.50 required.
+alias. The box is never a model prompt. A cube centred on the click alone was tried and dropped
+because its Dice was too low: a median of 0.32 over the 15 organs of upstream's human CT.
 
 Nothing else is post-processed: no component filtering, no sliding window. A target that reaches
 the edge of the box may be cut off, and the report says so.

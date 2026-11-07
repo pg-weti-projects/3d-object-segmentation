@@ -215,7 +215,9 @@ nothing below 0 (mass density, Gadus) `intensity_shift: auto` moves 0 to where
 HU has it; HU scans are left as they are. A click-only variant, with the cube
 centred on the click, was tried and dropped because its Dice was too low.
 
-Torch, the pinned upstream source and the weights are installed separately:
+Torch, the pinned upstream source and the weights are installed separately.
+The source and weights go to `sam-med3d-assets/` next to the repo, or wherever
+`--assets` or `SAM_MED3D_ASSETS` points (about 1 GB with torch):
 
 ```bash
 python scripts/install_sam_med3d.py

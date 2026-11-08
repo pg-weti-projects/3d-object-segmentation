@@ -229,6 +229,14 @@ On `/segment`, load the scan with target spacing and HU range `none` and
 denoising off (so that the model sees it as in a config), draw the box, and set
 its first and last slice. The first run loads the weights and takes a while.
 
+An experiment fine-tuning the model's decoder on our three fish did not help.
+Trained on a fish, it segments that same fish well (Dice 0.83-0.97). Trained on
+two fish and tested on the third, it does worse than the published weights in
+5 of 6 cases. The tuned sets are kept apart from the published weights and
+named, and can be selected with `weights: <name>` (the default is `standard`).
+See [docs/sam_med3d_finetuning.md](docs/sam_med3d_finetuning.md) for what was
+tried, the results, and what data might change them.
+
 ### Preparing a DICOM dump
 
 The Bluefin tuna scan arrives as a flat folder of files without an extension,

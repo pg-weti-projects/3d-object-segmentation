@@ -1,11 +1,12 @@
 """
 scripts/finetune_sam_med3d.py
 
-Fine-tunes SAM-Med3D's prompt encoder and mask decoder on fish scans and evaluates the result, as fixed in
-md-files/sam_med3d_finetune_protocol.md. The input is the standard weights and a set of scans with reference
+Fine-tunes SAM-Med3D's prompt encoder and mask decoder on fish scans and evaluates the result (see
+docs/sam_med3d_finetuning.md). The input is the standard weights and a set of scans with reference
 masks; the output is a named set of tuned weights in sam-med3d-assets/finetuned/<name>/, used with the
 sam_med3d method's `weights` parameter. The standard weights are never written to.
 
+    # --device: xpu or cuda, depending on the GPU of the machine it runs on (cpu works, but slowly)
     python scripts/finetune_sam_med3d.py encode --fish oreo --kind real --device xpu
     python scripts/finetune_sam_med3d.py train --name s1-oreo --fish oreo --device xpu
     python scripts/finetune_sam_med3d.py evaluate --weights s1-oreo --fish oreo gadus tuna
@@ -139,7 +140,7 @@ def command_train(arguments) -> int:
 
 
 def verdict(dice: list[float], hd95: list[float], hd95_bar_mm: float) -> dict:
-    """md-files/sam_med3d_protocol.md section 10: overlap, robustness and boundary, over the 9 clicks."""
+    """The pass criteria (docs/sam_med3d_finetuning.md): overlap, robustness and boundary, over the 9 clicks."""
     dice_values, hd_values = np.asarray(dice, float), np.asarray(hd95, float)
     overlap = float(np.median(dice_values))
     robust = int((dice_values >= 0.5).sum())
@@ -277,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_argument("--fish", nargs="*", default=[], choices=sorted(plan()))
         sub.add_argument("--input", action="append", default=[], metavar="NAME=PATH", help="replace a fish's scan")
         if name != "evaluate":
-            sub.add_argument("--device", default="cpu", help="cpu, xpu or cuda")
+            sub.add_argument("--device", default="cpu", help="xpu or cuda, depending on the GPU it runs on; cpu works, but slowly")
             sub.add_argument("--threads", type=int, default=None)
     commands.choices["encode"].add_argument("--kind", choices=finetune.KINDS, default="real")
     commands.choices["encode"].add_argument("--count", type=int, default=None, help="default: the recipe's")

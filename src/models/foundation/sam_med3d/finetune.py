@@ -4,7 +4,7 @@ Fine-tuning SAM-Med3D's prompt encoder and mask decoder on a frozen image encode
 Training cubes are made as `pipeline.segment` makes them (a cube on a box, the scan around it, the
 automatic intensity shift, upstream's z-score), from jittered boxes and with augmentation. Each cube is
 encoded once and cached; training then runs only the decoder, with a new click inside the target at
-every step. The recipe is fixed in md-files/sam_med3d_finetune_protocol.md, sections 2-3.
+every step. The recipe and the study are described in docs/sam_med3d_finetuning.md.
 
 No torch at import: only `train` and the functions it calls import it.
 """

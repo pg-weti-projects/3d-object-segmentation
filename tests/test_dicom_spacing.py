@@ -23,6 +23,7 @@ def write_slice(
     spacing_between: float | None = None,
     pixel_spacing: tuple[float, float] = (0.8, 0.8),
     size: int = 8,
+    orientation: tuple[float, ...] | None = None,
 ) -> None:
     dataset = Dataset()
     dataset.file_meta = FileMetaDataset()
@@ -34,6 +35,8 @@ def write_slice(
     dataset.Modality = "CT"
     dataset.InstanceNumber = index + 1
     dataset.ImagePositionPatient = [0.0, 0.0, float(position_z)]
+    if orientation is not None:
+        dataset.ImageOrientationPatient = [float(value) for value in orientation]
     dataset.PixelSpacing = [float(pixel_spacing[0]), float(pixel_spacing[1])]
     dataset.SliceThickness = float(thickness)
     if spacing_between is not None:
@@ -108,3 +111,27 @@ class TestSeriesSpacing:
             load_volume(folder, "dicom")
 
         assert not [record for record in caplog.records if "not evenly spaced" in record.message]
+
+
+def _loaded_instances(folder, orientation):
+    """The instance index of each loaded slice; z falls as the index rises."""
+    folder.mkdir(parents=True, exist_ok=True)
+    for index, z in enumerate((20.0, 16.5, 13.0)):
+        write_slice(folder, index, z, orientation=orientation)
+    volume = load_volume(folder, "dicom")
+    assert volume.spacing_mm[0] == 3.5
+    return (volume.data[:, 0, 0] + 1024).tolist()
+
+
+def test_slices_follow_a_normal_pointing_to_minus_z(tmp_path):
+    # the Bluefin tuna: normal (0, 0, -1), so z = 20, 16.5, 13
+    assert _loaded_instances(tmp_path / "s", (0.0, 1.0, 0.0, 1.0, 0.0, 0.0)) == [0.0, 1.0, 2.0]
+
+
+def test_slices_follow_a_normal_pointing_to_plus_z(tmp_path):
+    # Oreo: normal (0, 0, 1), so z = 13, 16.5, 20
+    assert _loaded_instances(tmp_path / "s", (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)) == [2.0, 1.0, 0.0]
+
+
+def test_slices_without_an_orientation_keep_ascending_z(tmp_path):
+    assert _loaded_instances(tmp_path / "s", None) == [2.0, 1.0, 0.0]

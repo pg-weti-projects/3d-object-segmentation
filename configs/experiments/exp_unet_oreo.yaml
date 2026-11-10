@@ -1,0 +1,25 @@
+experiment:
+  id: "exp_unet_oreo"
+  seed: 0
+  repetitions: 2
+
+data:
+  input_path: "data/raw/Oreo_fish/density"
+  reference_mask_path: "data/reference_masks/Oreo_fish/Segmentation.nii.gz"
+  format: "dicom"
+  box:
+    min_mm: [0, 147, 15]
+    max_mm: [165, 207, 48]
+
+algorithm:
+  name: "unet_2d"
+  parameters:
+    window: [1, 1210]
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

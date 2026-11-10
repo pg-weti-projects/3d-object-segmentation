@@ -1,0 +1,25 @@
+experiment:
+  id: "exp_unet_gadus"
+  seed: 0
+  repetitions: 2
+
+data:
+  input_path: "data/raw/Gadus_Morhua/Gadus_morhua.nii.gz"
+  reference_mask_path: "data/reference_masks/Gadus_Morhua/Segmentation.nii.gz"
+  format: "nifti"
+  box:
+    min_mm: [64.85, 27.26, 45.85]
+    max_mm: [135.28, 47.09, 60.93]
+
+algorithm:
+  name: "unet_2d"
+  parameters:
+    window: [3815, 20800]
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

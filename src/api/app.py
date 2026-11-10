@@ -17,6 +17,7 @@ def create_app() -> Flask:
         DEBUG=bool(settings.get("debug", False)),
         HOST=str(settings.get("host", "127.0.0.1")),
         PORT=int(settings.get("port", 5000)),
+        MAX_FORM_PARTS=int(settings.get("max_form_parts", 5000)),
         # where experiment results (results/<id>/mesh.*) live -> relative paths
         # are resolved from the repository root
         RESULTS_DIR=_repository_root() / str(settings.get("results_dir", "results")),

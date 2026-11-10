@@ -1,0 +1,28 @@
+experiment:
+  id: "check_tuna_box"
+  repetitions: 2
+
+data:
+  # the body series of the dump, split out by scripts/to_dicom_folders.py
+  input_path: "data/raw/DD2210_Blue_Tuna/DD2210_dicom/02_CUERPO_CUERPO_7_0"
+  # the hand annotation with the 20 mL of bone density taken out of it
+  # (results/tuna_mask_review/, see docs/contrast.md)
+  reference_mask_path: "data/reference_masks/DD2210_Bluefin_Tuna/tuna_gas_1mm.nii.gz"
+  format: "dicom"
+  # box around the bladder (mm from the first voxel, [z, y, x]) and a voxel in its gas
+  box:
+    min_mm: [196, 116, 175]
+    max_mm: [581, 237, 310]
+  seed_zyx: [89, 200, 305]
+
+algorithm:
+  name: "box_region"
+  parameters: {}
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

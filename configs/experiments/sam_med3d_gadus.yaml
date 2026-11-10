@@ -1,0 +1,25 @@
+experiment:
+  id: "sam_med3d_gadus"
+  description: "SAM-Med3D: one click in a 3D box; the cube is scaled to the box and shows the scan around it"
+  repetitions: 1
+
+data:
+  input_path: "data/raw/Gadus_Morhua/gadus_morhua_0.413mm.nii"
+  reference_mask_path: "data/reference_masks/Gadus_Morhua/Segmentation.nii.gz"
+  # box around the bladder, limited in z as well (mm from the first voxel, [z, y, x]), and a voxel inside it
+  box:
+    min_mm: [64.85, 27.26, 45.85]
+    max_mm: [135.28, 47.09, 60.93]
+  seed_zyx: [220, 97, 131]
+
+algorithm:
+  name: "sam_med3d"
+  parameters: {}  # threshold 0.5, intensity_shift "auto"
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

@@ -204,6 +204,39 @@ python scripts/measure_contrast.py
 python scripts/compare_methods.py
 ```
 
+### SAM-Med3D
+
+`sam_med3d` runs the SAM-Med3D foundation model (`sam_med3d_turbo.pth`, no
+training) on one click in a 3D box. The box must also be limited in z: the
+model's 128³ cube is centred on the box and scaled so that its longest side
+fills it. The rest of the cube shows the scan around the box, and the mask is
+kept inside the box. Its normalisation assumes HU, so on scans with almost
+nothing below 0 (mass density, Gadus) `intensity_shift: auto` moves 0 to where
+HU has it; HU scans are left as they are. A click-only variant, with the cube
+centred on the click, was tried and dropped because its Dice was too low.
+
+Torch, the pinned upstream source and the weights are installed separately.
+The source and weights go to `sam-med3d-assets/` next to the repo, or wherever
+`--assets` or `SAM_MED3D_ASSETS` points (about 1 GB with torch):
+
+```bash
+python scripts/install_sam_med3d.py
+python -m src.pipeline.runner configs/experiments/sam_med3d_oreo.yaml
+python -m pytest -m slow    # the tests that need the real weights
+```
+
+On `/segment`, load the scan with target spacing and HU range `none` and
+denoising off (so that the model sees it as in a config), draw the box, and set
+its first and last slice. The first run loads the weights and takes a while.
+
+An experiment fine-tuning the model's decoder on our three fish did not help.
+Trained on a fish, it segments that same fish well (Dice 0.83-0.97). Trained on
+two fish and tested on the third, it does worse than the published weights in
+5 of 6 cases. The tuned sets are kept apart from the published weights and
+named, and can be selected with `weights: <name>` (the default is `standard`).
+See [docs/sam_med3d_finetuning.md](docs/sam_med3d_finetuning.md) for what was
+tried, the results, and what data might change them.
+
 ### Preparing a DICOM dump
 
 The Bluefin tuna scan arrives as a flat folder of files without an extension,

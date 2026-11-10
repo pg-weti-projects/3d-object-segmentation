@@ -47,6 +47,9 @@
                   <div class="form-text">The image is scaled to [0, 1] in this window before segmentation.</div>
                 </div>
               </div>
+              <div class="alert alert-info small mt-3 mb-0" role="note">
+                <strong>For SAM-Med3D</strong> set target spacing and HU range to <code>none</code> and untick denoising, so that the model sees the scan as it is (as in an experiment config).
+              </div>
               <div class="mt-3">
                 <div class="form-check mb-2">
                   <input class="form-check-input" type="checkbox" id="invert_hu" name="invert_hu" {% if form.get('invert_hu') %}checked{% endif %}>

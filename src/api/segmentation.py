@@ -18,6 +18,8 @@ from werkzeug.datastructures import FileStorage
 from src.core import PreprocessingConfig, Volume, preprocess
 from src.core.box import Box, BoxError, crop_volume, restore_mask
 from src.models import box_region
+from src.models.foundation import sam_med3d
+from src.models.foundation.sam_med3d import assets as sam_med3d_assets
 from src.models.params import (
     ALGORITHM_DEFAULTS,
     ALGORITHMS,
@@ -38,7 +40,8 @@ _STORE_LOCK = threading.Lock()
 _MISSING = "No loaded volume on the server. Load the scan again."
 
 BOX_REGION = "box_region"
-METHODS: tuple[str, ...] = (*ALGORITHMS, BOX_REGION)
+SAM_MED3D = "sam_med3d"
+METHODS: tuple[str, ...] = (*ALGORITHMS, BOX_REGION, SAM_MED3D)
 
 PREVIEW_MAX_SIDE = 256
 PREVIEW_MAX_VOXELS = 8_000_000
@@ -48,6 +51,7 @@ ALGORITHM_LABELS: dict[str, str] = {
     GEODESIC_ACTIVE_CONTOUR: "Geodesic active contour (3D, MorphGAC)",
     GROWCUT: "GrowCut (3D cellular automaton, Vezhnevets & Konouchine 2005)",
     BOX_REGION: "Box region (threshold between bladder and tissue; needs a box)",
+    SAM_MED3D: "SAM-Med3D (foundation model; one click in a box with a slice range)",
 }
 
 _START_FIELD = ("init_from", "Start from (contrast is recommended)", "choice")
@@ -86,6 +90,20 @@ ALGORITHM_FIELDS: dict[str, list[tuple[str, str, str]]] = {
         ("bladder_is_dark", "Bladder darker than tissue", "bool"),
         ("use_hull", "Limit to convex hull of the tissue", "bool"),
     ],
+    SAM_MED3D: [
+        ("threshold", "Mask threshold (0-1)", "number"),
+        ("intensity_shift", "Intensity shift (a number or auto)", "text"),
+        ("weights", "Weights (standard or a tuned set)", "text"),
+    ],
+}
+
+METHOD_NOTES: dict[str, str] = {
+    SAM_MED3D: (
+        "Needs a box with a slice range: its cube is scaled to the box, so a box over all slices of a long "
+        "scan makes it far too coarse. Load the scan with target spacing and HU range set to none and "
+        "denoising off to get the same mask as the CLI. The first run loads the weights, which takes "
+        "a while; later runs are faster."
+    ),
 }
 
 _GRID_HELP = "Resolution of the computation: larger is faster but gives a coarser mask boundary."
@@ -171,6 +189,23 @@ FIELD_HELP: dict[str, dict[str, str]] = {
             "followed out of the fish."
         ),
     },
+    SAM_MED3D: {
+        "threshold": (
+            "Cut-off on the model's probability: lower gives a larger mask, higher a smaller one. 0.5 is "
+            "what the model was trained with."
+        ),
+        "intensity_shift": (
+            "Added to every value before the model's normalisation, which only uses values above 0. 'auto' "
+            "(default) finds air and tissue in the box (Otsu) and puts 0 where HU has it, but only when "
+            "almost nothing in the box is below 0 (e.g. mass density, Gadus); HU scans are left as they are. "
+            "A number sets the shift yourself; 0 keeps the scan as it is."
+        ),
+        "weights": (
+            "'standard' is the published model. A fine-tuned set is named by its folder in "
+            "sam-med3d-assets/finetuned/ (made by scripts/finetune_sam_med3d.py); its manifest there says "
+            "which fish it was trained on. A set trained on a fish says nothing about how it does on that fish."
+        ),
+    },
 }
 
 NULLABLE_FIELDS: frozenset[str] = frozenset(
@@ -185,6 +220,8 @@ FIELD_CHOICES: dict[str, tuple[str, ...]] = {
 
 
 def algorithm_defaults(name: str) -> dict[str, Any]:
+    if name == SAM_MED3D:
+        return {key: sam_med3d.pipeline.DEFAULT_PARAMETERS[key] for key, _label, _kind in ALGORITHM_FIELDS[SAM_MED3D]}
     if name == BOX_REGION:
         return {key: box_region.DEFAULT_PARAMETERS[key] for key, _label, _kind in ALGORITHM_FIELDS[BOX_REGION]}
     return dict(DEFAULT_PARAMS) if name == CHAN_VESE else dict(ALGORITHM_DEFAULTS[name])
@@ -207,9 +244,17 @@ def measured_contrast(params_used: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def algorithm_label(name: str) -> str:
+    """The label in the method list; SAM-Med3D says so when it cannot run here."""
+    if name == SAM_MED3D and sam_med3d_assets.missing():
+        return f"{ALGORITHM_LABELS[name]} - not installed (run {sam_med3d_assets.INSTALL_COMMAND})"
+    return ALGORITHM_LABELS[name]
+
+
 def form_context() -> dict[str, Any]:
     return {
-        "algorithms": [(name, ALGORITHM_LABELS[name]) for name in METHODS],
+        "algorithms": [(name, algorithm_label(name)) for name in METHODS],
+        "notes": METHOD_NOTES,
         "fields": ALGORITHM_FIELDS,
         "help": FIELD_HELP,
         "defaults": {name: algorithm_defaults(name) for name in METHODS},
@@ -232,11 +277,13 @@ def parse_seed(text: str) -> tuple[int, int, int]:
 
 
 _BOX_FIELDS = ("box_x_min", "box_x_max", "box_y_min", "box_y_max")
+_SLICE_FIELDS = ("box_z_from", "box_z_to")
 
 
 def parse_box(form: Mapping[str, str], volume: Volume) -> Box | None:
     """The box drawn on the axial image (voxel indices of the preprocessed volume, max exclusive)
-    as a `Box` covering the whole z range, or None when no box was drawn."""
+    as a `Box`, or None when no box was drawn. It covers every slice unless the optional slice range
+    (first and last slice, both included) is given."""
     raw = [str(form.get(name, "")).strip() for name in _BOX_FIELDS]
     if not any(raw):
         return None
@@ -249,8 +296,19 @@ def parse_box(form: Mapping[str, str], volume: Volume) -> Box | None:
         raise ValueError(
             f"The box x {x0}-{x1}, y {y0}-{y1} does not fit in the volume (x < {columns}, y < {rows})."
         )
+    z0, z1 = 0, depth
+    slices = [str(form.get(name, "")).strip() for name in _SLICE_FIELDS]
+    if any(slices):
+        try:
+            first, last = (int(value) for value in slices)
+        except ValueError as exc:
+            raise ValueError("The slice range needs both its first and last slice, as whole numbers.") from exc
+        first, last = min(first, last), max(first, last)
+        if not (0 <= first and last < depth):
+            raise ValueError(f"The slice range {first}-{last} does not fit in the volume (slices 0-{depth - 1}).")
+        z0, z1 = first, last + 1
     try:
-        return Box.from_voxels((0, y0, x0), (depth, y1, x1), volume.spacing_mm)
+        return Box.from_voxels((z0, y0, x0), (z1, y1, x1), volume.spacing_mm)
     except BoxError as exc:
         raise ValueError(str(exc)) from exc
 
@@ -298,6 +356,14 @@ def algorithm_config(form: Mapping[str, str]) -> AlgorithmConfig:
         if not isinstance(extra, dict):
             raise ValueError("Advanced parameters must be a JSON object.")
         parameters.update(extra)
+    shift = parameters.get("intensity_shift") if name == SAM_MED3D else None
+    if isinstance(shift, str) and shift.strip().lower() != sam_med3d.pipeline.AUTO:
+        try:
+            parameters["intensity_shift"] = float(shift)
+        except ValueError as exc:
+            raise ValueError("intensity_shift must be a number or auto.") from exc
+    elif isinstance(shift, str):
+        parameters["intensity_shift"] = sam_med3d.pipeline.AUTO
     return AlgorithmConfig(name=name, parameters=parameters)
 
 
@@ -421,7 +487,7 @@ def run_segmentation(form: Mapping[str, str], store_dir: Path) -> dict[str, Any]
         hu_range=tuple(pre["hu_range"]) if pre["hu_range"] else None, invert_hu=bool(pre["invert_hu"])
     )
     box = parse_box(form, volume)
-    if algorithm.name == BOX_REGION and box is None:
+    if algorithm.name in (BOX_REGION, SAM_MED3D) and box is None:
         raise ValueError("Draw a box around the bladder on the axial image first (drag with the mouse).")
     target, where, local_seed = volume, None, seed
     if box is not None:
@@ -432,12 +498,42 @@ def run_segmentation(form: Mapping[str, str], store_dir: Path) -> dict[str, Any]
         local_seed = tuple(s - w.start for s, w in zip(seed, where))
         if any(not 0 <= s < n for s, n in zip(local_seed, target.shape)):
             raise ValueError(f"The seed point {seed} lies outside the box; click inside it or draw the box again.")
+    if algorithm.name == SAM_MED3D and where[0].stop - where[0].start == volume.shape[0] > 1:
+        raise ValueError(
+            "SAM-Med3D needs the box limited in z: set its first and last slice (the bladder's), "
+            f"or its cube is scaled to all {volume.shape[0]} slices and becomes too coarse."
+        )
 
     start = time.perf_counter()
     measured = None
     if algorithm.name == BOX_REGION:
         local_mask = box_region.segment(target, {**algorithm.parameters, "seed_zyx": local_seed})
         status, warnings, n_warnings = ("ok" if local_mask.any() else "empty"), [], 0
+    elif algorithm.name == SAM_MED3D:
+        # the same function and parameters as the CLI (runner): the whole volume, the box and the click
+        box_zyx = [[w.start, w.stop] for w in where]
+        local_mask = sam_med3d.segment(volume, {**algorithm.parameters, "seed_zyx": list(seed), "box_zyx": box_zyx})
+        report = local_mask.report
+        status = "ok" if np.asarray(local_mask).any() else "empty"
+        warnings = [
+            f"Cube voxel {report['spacing_mm']:.3g} mm ({report['spacing_vs_trained']:.2g} x the 1.5 mm "
+            "the model was trained at)."
+        ]
+        if report["weights"] != sam_med3d_assets.STANDARD:
+            warnings.append(f"Weights: the fine-tuned set '{report['weights']}', not the published model.")
+        if any([pre["target_spacing"], pre["hu_range"], pre["denoise"]]):
+            warnings.append(
+                "This volume was resampled, clipped or denoised when it was loaded, so the mask can differ "
+                "from the CLI's. Load it with target spacing and HU range none and denoising off."
+            )
+        rule = report.get("intensity_shift_rule")
+        if rule and rule["applied"]:
+            warnings.append(
+                f"Intensity shift auto: {rule['shift']:.4g} (air {rule['air']:.4g}, tissue {rule['tissue']:.4g} in the box), "
+                "so that air is below 0 as in HU."
+            )
+        warnings += list(report["warnings"])
+        n_warnings = len(warnings)
     else:
         result = segment_volume(target, algorithm, local_seed, config)
         local_mask, status = result.mask, result.status
@@ -445,7 +541,8 @@ def run_segmentation(form: Mapping[str, str], store_dir: Path) -> dict[str, Any]
         n_warnings = int(result.params_used.get("n_warnings", len(warnings)))
         measured = measured_contrast(result.params_used)
     elapsed = time.perf_counter() - start
-    mask = restore_mask(local_mask, volume.shape, where) if where is not None else np.asarray(local_mask)
+    whole = algorithm.name == SAM_MED3D  # its mask is on the whole volume already
+    mask = restore_mask(local_mask, volume.shape, where) if where is not None and not whole else np.asarray(local_mask)
 
     voxel_mm3 = float(np.prod(volume.spacing_mm))
     mask_voxels = int(mask.sum())
@@ -453,10 +550,13 @@ def run_segmentation(form: Mapping[str, str], store_dir: Path) -> dict[str, Any]
     view["seed"] = list(seed)
     view["result"] = {
         "algorithm": algorithm.name,
-        "algorithm_label": ALGORITHM_LABELS[algorithm.name],
+        "algorithm_label": algorithm_label(algorithm.name),
         "parameters": algorithm.parameters,
         "status": status,
-        "box": None if where is None else {"x": [where[2].start, where[2].stop], "y": [where[1].start, where[1].stop]},
+        "box": None if where is None else {
+            "x": [where[2].start, where[2].stop], "y": [where[1].start, where[1].stop], "z": [where[0].start, where[0].stop],
+            "all_slices": where[0].stop - where[0].start == volume.shape[0],
+        },
         "mask_voxels": mask_voxels,
         "mask_volume_mm3": mask_voxels * voxel_mm3,
         "elapsed_s": elapsed,

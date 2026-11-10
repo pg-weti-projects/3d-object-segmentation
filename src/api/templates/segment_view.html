@@ -48,7 +48,24 @@
                 <span class="fw-semibold">Box</span>
                 <span id="box-status" class="text-secondary small ms-1">none - the method sees the whole volume. Drag on the axial image to draw one.</span>
                 <button class="btn btn-link btn-sm p-0 ms-2" type="button" id="box-clear" hidden>Clear box</button>
-                <div class="form-text">With a box, only its contents (all slices) are given to the method. Required by "Box region".</div>
+                <div class="form-text">With a box, only its contents are given to the method; "SAM-Med3D" also sees the scan around it, but keeps its mask inside it. Required by "Box region" and "SAM-Med3D".</div>
+                <div class="row g-2 mt-1 align-items-end">
+                  <div class="col">
+                    <label class="form-label small mb-1" for="box_z_from">First slice (Z)</label>
+                    <div class="input-group input-group-sm">
+                      <input class="form-control" type="text" id="box_z_from" name="box_z_from" placeholder="all" value="{{ form.get('box_z_from', '') }}">
+                      <button class="btn btn-outline-secondary slice-from-axial" type="button" data-target="box_z_from" title="Use the axial slice shown now">current</button>
+                    </div>
+                  </div>
+                  <div class="col">
+                    <label class="form-label small mb-1" for="box_z_to">Last slice (Z)</label>
+                    <div class="input-group input-group-sm">
+                      <input class="form-control" type="text" id="box_z_to" name="box_z_to" placeholder="all" value="{{ form.get('box_z_to', '') }}">
+                      <button class="btn btn-outline-secondary slice-from-axial" type="button" data-target="box_z_to" title="Use the axial slice shown now">current</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-text">Optional for most methods (empty = all slices). Required by "SAM-Med3D": move the axial slider to the bladder's first and last slice and press "current".</div>
               </div>
 
               <label class="form-label mt-3" for="algorithm">Segmentation method</label>
@@ -61,6 +78,7 @@
               {% for name, label in algorithms %}
               <fieldset class="algorithm-fields mt-3" data-algorithm="{{ name }}" {% if name != selected %}hidden{% endif %}>
                 <legend class="h6">Parameters <span class="text-secondary small">(empty = default; hover ⓘ to see how a parameter affects the result)</span></legend>
+                {% if notes[name] %}<div class="alert alert-info small py-2" role="note">{{ notes[name] }}</div>{% endif %}
                 <div class="row g-3">
                   {% for key, field_label, kind in fields[name] %}
                   {% set field = name ~ "__" ~ key %}
@@ -113,7 +131,7 @@
             <dl class="row mb-0">
               <dt class="col-sm-4 mt-2">Status</dt><dd class="col-sm-8 mt-2">{{ result.status }}</dd>
               <dt class="col-sm-4 mt-2">Seed point (Z, Y, X)</dt><dd class="col-sm-8 mt-2">{{ seed }}</dd>
-              <dt class="col-sm-4 mt-2">Box</dt><dd class="col-sm-8 mt-2">{% if result.box %}x {{ result.box.x[0] }}–{{ result.box.x[1] - 1 }}, y {{ result.box.y[0] }}–{{ result.box.y[1] - 1 }} (all slices){% else %}none (whole volume){% endif %}</dd>
+              <dt class="col-sm-4 mt-2">Box</dt><dd class="col-sm-8 mt-2">{% if result.box %}x {{ result.box.x[0] }}–{{ result.box.x[1] - 1 }}, y {{ result.box.y[0] }}–{{ result.box.y[1] - 1 }} ({% if result.box.all_slices %}all slices{% else %}slices {{ result.box.z[0] }}–{{ result.box.z[1] - 1 }}{% endif %}){% else %}none (whole volume){% endif %}</dd>
               {% if result.contrast %}
               <dt class="col-sm-4 mt-2">Contrast</dt>
               <dd class="col-sm-8 mt-2">

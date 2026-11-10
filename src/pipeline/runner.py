@@ -116,7 +116,15 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
 
     where = None
     model_input = volume
-    if config.data.box is not None:
+    parameters = dict(config.algorithm.parameters)
+    if config.data.box is None and getattr(segment, "needs_box", False):
+        raise RunnerError(f"'{config.algorithm.name}' needs a box (data.box) around the target, and none was given.")
+    if config.data.box is not None and getattr(segment, "takes_box", False):
+        # the method looks past the box (SAM-Med3D): it gets the whole scan and the box, in voxels
+        box_where = config.data.box.slices(volume.shape, volume.spacing_mm)
+        parameters["box_zyx"] = [[w.start, w.stop] for w in box_where]
+        logger.info("box: %s voxels; the method sees the scan around it and keeps its mask inside it", parameters["box_zyx"])
+    elif config.data.box is not None:
         model_input, where = crop_volume(volume, config.data.box)
         logger.info(
             "box: the algorithm sees %s of %s voxels (%.1f%%)",
@@ -125,7 +133,6 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
             100 * model_input.data.size / volume.data.size,
         )
 
-    parameters = dict(config.algorithm.parameters)
     if config.data.seed_zyx is not None and "seed_zyx" not in parameters:
         offset = [w.start for w in where] if where else [0, 0, 0]
         local_seed = tuple(v - o for v, o in zip(config.data.seed_zyx, offset))
@@ -133,12 +140,14 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
             raise RunnerError(f"data.seed_zyx {config.data.seed_zyx} lies outside the volume the algorithm sees")
         parameters["seed_zyx"] = local_seed  # the algorithms take it relative to the volume they receive
 
-    masks, runtimes = [], []
+    masks, runtimes, method_report = [], [], None
     for repetition in range(max(config.experiment.repetitions, 1)):
         _seed(config.experiment.seed)  # every repetition starts from the same seed
         started = time.perf_counter()
-        local_mask = np.asarray(segment(model_input, dict(parameters)))
+        output = segment(model_input, dict(parameters))
         runtimes.append(time.perf_counter() - started)
+        method_report = getattr(output, "report", None)  # a mask may also say what the method did
+        local_mask = np.asarray(output)
         if local_mask.shape != model_input.shape:
             raise RunnerError(
                 f"'{config.algorithm.name}' returned a mask of shape {local_mask.shape}, "
@@ -156,10 +165,15 @@ def _run(config: ExperimentConfig, result_dir: Path, logger: logging.Logger) -> 
         result_dir=result_dir,
         mask=mask,
         spacing_mm=volume.spacing_mm,
-        box_prompted=where is not None,
+        box_prompted=config.data.box is not None,
         runtimes_s=runtimes,
         deterministic=deterministic,
     )
+    if method_report:
+        (result_dir / "method_report.json").write_text(json.dumps(method_report, indent=2), encoding="utf-8")
+        for warning in method_report.get("warnings", []):
+            result.warnings.append(warning)
+            logger.warning(warning)
     if not deterministic:
         result.warnings.append("repetitions gave different masks")
         logger.warning(result.warnings[-1])

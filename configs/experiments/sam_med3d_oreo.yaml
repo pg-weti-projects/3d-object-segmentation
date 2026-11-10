@@ -1,0 +1,26 @@
+experiment:
+  id: "sam_med3d_oreo"
+  description: "SAM-Med3D: one click in a 3D box; the cube is scaled to the box and shows the scan around it"
+  repetitions: 1
+
+data:
+  input_path: "data/raw/Oreo_fish/density"
+  reference_mask_path: "data/reference_masks/Oreo_fish/Segmentation.nii.gz"
+  format: "dicom"
+  # box around the bladder, limited in z as well (mm from the first voxel, [z, y, x]), and a voxel inside it
+  box:
+    min_mm: [12, 129, 15]
+    max_mm: [87, 219, 48]
+  seed_zyx: [21, 57, 10]
+
+algorithm:
+  name: "sam_med3d"
+  parameters: {}  # threshold 0.5, intensity_shift "auto"
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

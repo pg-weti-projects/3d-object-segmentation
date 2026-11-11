@@ -31,6 +31,9 @@ SegmentFunction = Callable[[Volume, dict], np.ndarray]
 # dependency (e.g. torch) only matters for the algorithm that needs it.
 ALGORITHMS: dict[str, str] = {
     "box_region": "src.models.box_region:segment",
+    "chan_vese": "src.models.analytical:chan_vese",
+    "geodesic_active_contour": "src.models.analytical:geodesic_active_contour",
+    "growcut": "src.models.analytical:growcut",
     "unet_2d": "src.models.unet:segment",
     "unet_25d": "src.models.unet:segment",
     "medsam": "src.models.foundation.medsam:segment",

@@ -204,6 +204,35 @@ python scripts/measure_contrast.py
 python scripts/compare_methods.py
 ```
 
+Every method also runs as an experiment, so a run of any of them lands in
+`results/` with its mask, its mesh and its metrics, and shows up in the
+Experiments tab next to the others:
+
+```bash
+python -m src.pipeline.runner configs/experiments/check_oreo_box.yaml
+python -m src.pipeline.runner configs/experiments/exp_analytical_oreo.yaml
+python -m src.pipeline.runner configs/experiments/exp_analytical_gac_oreo.yaml
+python -m src.pipeline.runner configs/experiments/exp_analytical_growcut_oreo.yaml
+```
+
+All four configs use the same box and the same seed point, so what they measure
+is the method and nothing else:
+
+| Method | Dice | IoU | Volume | Run time |
+|---|---|---|---|---|
+| `box_region` | **0.935** | 0.878 | 31.8 mL | 0.01 s |
+| `chan_vese` | 0.924 | 0.859 | 32.1 mL | 0.15 s |
+| `growcut` | 0.819 | 0.693 | 21.6 mL | 0.02 s |
+| `geodesic_active_contour` | 0.757 | 0.609 | 19.7 mL | 0.04 s |
+
+(Oreo fish, reference volume 31.2 mL. These are the numbers the runner produces
+from the configs above; the table further up comes from `compare_methods.py`,
+which measures the methods on its own box.)
+
+Each run also writes a `method_report.json` with the contrast the method
+measured, the parameters it used and anything it warned about, such as a region
+that reached the wall of the volume.
+
 ### SAM-Med3D
 
 `sam_med3d` runs the SAM-Med3D foundation model (`sam_med3d_turbo.pth`, no

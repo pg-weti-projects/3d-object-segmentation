@@ -19,8 +19,8 @@ htmlcov/
 .ruff_cache/
 
 # model training
-torch/Totalsegmentator_dataset_small_v201
-torch/checkpoints/
+notebooks/Totalsegmentator_dataset_small_v201
+notebooks/checkpoints/
 
 # Data files
 *.nii

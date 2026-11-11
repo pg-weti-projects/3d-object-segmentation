@@ -1,0 +1,25 @@
+experiment:
+  id: "exp_unet_tuna"
+  seed: 0
+  repetitions: 2
+
+data:
+  input_path: "data/raw/DD2210_Bluefin_Tuna/skan_3_DD2210_Bluefin_Tuna.nii.gz"
+  reference_mask_path: "data/reference_masks/DD2210_Bluefin_Tuna/Segmentation.nii.gz"
+  format: "nifti"
+  box:
+    min_mm: [199.5, 124.17, 185.42]
+    max_mm: [567, 234.08, 307.07]
+
+algorithm:
+  name: "unet_2d"
+  parameters:
+    window: [-1000, 200]
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

@@ -1,7 +1,8 @@
 import numpy as np
-import segmentation_models_pytorch as smp
+import pytest
 
-import torch
+smp = pytest.importorskip("segmentation_models_pytorch")
+torch = pytest.importorskip("torch")
 from src.core.volume import Volume
 from src.models import unet
 

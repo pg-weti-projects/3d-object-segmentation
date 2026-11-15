@@ -18,8 +18,13 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# model training
+notebooks/Totalsegmentator_dataset_small_v201
+notebooks/checkpoints/
+
 # Data files
 *.nii
+*.nii.gz
 *.dcm
 *.tif
 *.tiff

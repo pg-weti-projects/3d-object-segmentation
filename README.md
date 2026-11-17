@@ -295,6 +295,28 @@ cannot work (the geodesic active contour reports `empty`) from those that return
 a number anyway. Only a method that uses shape or texture rather than intensity
 has anything to work with here.
 
+Forcing them to answer anyway, by starting from a ball at the point rather than
+from the measured contrast (`init_from: seed_ball`, and `bladder_is_dark: false`
+for `box_region`), is the best this family does on this fish:
+
+| Method | Dice | Volume |
+|---|---|---|
+| `geodesic_active_contour` | **0.265** | 453 mL |
+| `chan_vese` | 0.204 | 795 mL |
+| `growcut` | 0.161 | 28 mL |
+| `box_region`, brighter | 0.155 | 2239 mL |
+
+Against 321 mL, so even the best of them is half as large again as the organ.
+Tuning does not close that: raising the edge weight (`gac_alpha` 100 to 200)
+moves the geodesic active contour from 0.265 to 0.266, and halving the inflation
+(`balloon` 1.0 to 0.5) collapses it to an empty mask. The wall is bright but not
+closed, so the contour either escapes through a gap or never reaches it.
+
+Measured ceilings on this scan, inside the box: the best Dice any single
+intensity threshold can reach is 0.39 (0.40 after 1.5 mm of smoothing), and the
+best any connected region grown from this point can reach is 0.15. The numbers
+above are at that ceiling, which is a property of the scan and not of the code.
+
 ### SAM-Med3D
 
 `sam_med3d` runs the SAM-Med3D foundation model (`sam_med3d_turbo.pth`, no

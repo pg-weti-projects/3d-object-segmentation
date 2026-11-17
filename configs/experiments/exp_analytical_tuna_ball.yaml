@@ -1,0 +1,29 @@
+experiment:
+  id: "exp_chan_vese_tuna_ball"
+  description: "Improved Chan-Vese on the Bluefin tuna, grown from a ball at the seed point instead of from the measured contrast"
+  seed: 42
+  repetitions: 2
+
+data:
+  input_path: "data/raw/DD2210_Blue_Tuna/DD2210_dicom/02_CUERPO_CUERPO_7_0"
+  reference_mask_path: "data/reference_masks/DD2210_Bluefin_Tuna/Series_3_segmentation.nii.gz"
+  format: "dicom"
+  # the box and the point of sam_med3d_tuna.yaml: the same target for every method.
+  # The point is the deepest voxel of the reference mask, 19 mm from its boundary.
+  box:
+    min_mm: [199.5, 124.17, 185.42]
+    max_mm: [567, 234.08, 307.07]
+  seed_zyx: [84, 206, 285]
+
+algorithm:
+  name: "chan_vese"
+  parameters:
+    init_from: "seed_ball"
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

@@ -233,6 +233,40 @@ Each run also writes a `method_report.json` with the contrast the method
 measured, the parameters it used and anything it warned about, such as a region
 that reached the wall of the volume.
 
+#### The same four methods on the Bluefin tuna
+
+The tuna body series (`02_CUERPO_CUERPO_7_0`, 3.5 mm) against
+`Series_3_segmentation.nii.gz`, with the box and the point of
+`sam_med3d_tuna.yaml` so that every method is aimed at the same organ:
+
+```bash
+python -m src.pipeline.runner configs/experiments/exp_box_region_tuna.yaml
+python -m src.pipeline.runner configs/experiments/exp_box_region_tuna_bright.yaml
+python -m src.pipeline.runner configs/experiments/exp_analytical_gac_tuna.yaml
+python -m src.pipeline.runner configs/experiments/exp_analytical_growcut_tuna.yaml
+```
+
+| Method | Dice | Volume | What it did |
+|---|---|---|---|
+| `box_region`, `bladder_is_dark: false` | 0.155 | 2239 mL | ran over half the box |
+| `growcut` | 0.024 | 4.8 mL | barely left the seed point |
+| `box_region` | 0.000 | 0.1 mL | found nothing darker than the tissue |
+| `geodesic_active_contour` | 0.000 | 0 mL | refused: `status: empty`, no contrast to start from |
+| `chan_vese` | - | - | raised: after binarising, the point is background |
+
+Reference 320.6 mL. This is not a tuning problem. Measured on the scan, the
+median inside the annotation is 70 HU against 44 HU in a shell of tissue around
+it, so the annotated organ is 26 HU *denser* than its surroundings, and only 6%
+of it is gas. Every method here answers the question "which connected region
+around this point is darker than the tissue", and on this fish that region is
+not the swim bladder. Looking for a brighter region instead does not help
+either: there is no boundary to stop at, so it floods.
+
+What this says for the benchmark: the tuna separates methods that notice they
+cannot work (the geodesic active contour reports `empty`) from those that return
+a number anyway. Only a method that uses shape or texture rather than intensity
+has anything to work with here.
+
 ### SAM-Med3D
 
 `sam_med3d` runs the SAM-Med3D foundation model (`sam_med3d_turbo.pth`, no

@@ -233,6 +233,34 @@ Each run also writes a `method_report.json` with the contrast the method
 measured, the parameters it used and anything it warned about, such as a region
 that reached the wall of the volume.
 
+#### The same four methods on Gadus morhua
+
+`Gadus_morhua.nii.gz` at 0.2065 mm against its reference mask, with the box of
+`sam_med3d_gadus.yaml` and the deepest voxel of the annotation as the point:
+
+```bash
+python -m src.pipeline.runner configs/experiments/exp_box_region_gadus.yaml
+python -m src.pipeline.runner configs/experiments/exp_analytical_gadus.yaml
+python -m src.pipeline.runner configs/experiments/exp_analytical_gac_gadus.yaml
+python -m src.pipeline.runner configs/experiments/exp_analytical_growcut_gadus.yaml
+```
+
+| Method | Dice | IoU | HD95 | Volume |
+|---|---|---|---|---|
+| `geodesic_active_contour` | **0.700** | 0.539 | 4.1 mm | 2.67 mL |
+| `box_region` | 0.673 | 0.508 | 6.6 mm | 1.77 mL |
+| `growcut` | 0.593 | 0.421 | 3.8 mm | 1.93 mL |
+| `chan_vese` | 0.506 | 0.339 | 4.6 mm | 1.74 mL |
+
+Reference 2.19 mL. Note the ordering: the method that wins on the Oreo fish
+comes third here, and the one that comes last on the Oreo wins. A bladder with
+no gas in it is a different problem from a bladder full of it, and a single
+Dice column across species hides that.
+
+Two scans of this fish are in circulation, one at 0.2065 mm and one at 0.413 mm;
+the box is the same in millimetres, but a point given in voxels is not, so
+`seed_zyx` differs by a factor of two between these configs and the SAM-Med3D one.
+
 #### The same four methods on the Bluefin tuna
 
 The tuna body series (`02_CUERPO_CUERPO_7_0`, 3.5 mm) against

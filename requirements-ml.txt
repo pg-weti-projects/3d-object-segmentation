@@ -1,0 +1,6 @@
+# The deep-learning methods, kept apart from requirements.txt: torch is large
+# and only unet_2d and the SAM-Med3D fine-tuning need it. Without these two
+# packages their tests skip themselves, so the suite still runs on a machine
+# without them. CI installs the CPU wheels - see .github/workflows/tests.yml.
+torch>=2.0
+segmentation_models_pytorch>=0.3

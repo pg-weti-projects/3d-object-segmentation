@@ -1,0 +1,28 @@
+experiment:
+  id: "exp_chan_vese_gadus"
+  description: "Improved Chan-Vese on Gadus morhua, inside the box, started from the measured contrast"
+  seed: 42
+  repetitions: 2
+
+data:
+  input_path: "data/raw/Gadus_Morhua/Gadus_Morhua.nii.gz"
+  reference_mask_path: "data/reference_masks/Gadus_Morhua/Segmentation.nii.gz"
+  format: "nifti"
+  box:
+    min_mm: [66.9, 24.1, 42.3]
+    max_mm: [133.3, 50.2, 64.5]
+  seed_zyx: [443, 193, 263]
+
+algorithm:
+  name: "chan_vese"
+  parameters:
+    init_from: "contrast"  # start from the measured contrast, not from a ball around the seed
+    hu_range: [16000, 22000]
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

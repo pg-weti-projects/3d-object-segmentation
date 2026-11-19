@@ -7,7 +7,7 @@ from src.pipeline.experiment import ExperimentConfigError, load_experiment_confi
 def _write(tmp_path, data_extra=""):
     path = tmp_path / "exp.yaml"
     path.write_text(
-        "data:\n  input_path: scan.dcm\n" + data_extra + "algorithm:\n  name: medsam\n",
+        "data:\n  input_path: scan.dcm\n" + data_extra + "algorithm:\n  name: box_region\n",
         encoding="utf-8",
     )
     return path

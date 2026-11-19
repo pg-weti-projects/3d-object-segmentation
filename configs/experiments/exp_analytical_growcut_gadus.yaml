@@ -2,7 +2,7 @@ experiment:
   id: "exp_growcut_gadus"
   description: "GrowCut on Gadus morhua, inside the box, started from the measured contrast"
   seed: 42
-  repetitions: 1
+  repetitions: 2
 
 data:
   input_path: "data/raw/Gadus_Morhua/Gadus_morhua.nii.gz"

@@ -2,7 +2,7 @@ experiment:
   id: "exp_growcut_oreo"
   description: "GrowCut on Oreo_fish, inside the box, started from the measured contrast"
   seed: 42
-  repetitions: 1
+  repetitions: 2
 
 data:
   input_path: "data/raw/Oreo_fish/density"

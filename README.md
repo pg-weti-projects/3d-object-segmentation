@@ -1,169 +1,39 @@
 # 3D Swim Bladder Segmentation & Reconstruction
 
-A research framework for **3D swim bladder segmentation from CT scans**, geometric mesh reconstruction, and multi-model benchmarking.
+A research framework for **3D swim bladder segmentation from CT scans**,
+geometric mesh reconstruction, and multi-model benchmarking. It compares
+analytical methods, a trained 2D U-Net and a foundation model on the same
+scans, the same box and the same reference masks, and turns the result into a
+mesh you can look at and measure.
 
----
-
-## Flask Application
-
-Create and activate a virtual environment:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-On Windows:
-
-```powershell
-python -m venv .venv
-.venv\Scripts\activate
-```
-
-Install dependencies:
+## Quick start
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 python -m pip install -r requirements.txt
-```
-
-The `src/api/config.toml` file contains application runtime settings. Adjust it
-if needed, then start Flask:
-
-```bash
 python -m src.api.app
 ```
 
-Open `http://127.0.0.1:5000` to verify that the standalone web application is
-running.
+Open `http://127.0.0.1:5000`. Runtime settings live in `src/api/config.toml`.
 
-### Application endpoints
-
-The Flask application is organized around separate routes, so further pages
-and endpoints can be added without changing the application entry point.
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `GET` | `/preprocess` | Display the volume preprocessing form |
-| `GET` | `/datasets` | Redirect to the unified raw data preprocessing page |
-| `POST` | `/datasets` | Save uploaded files as a new server-side dataset |
-| `POST` | `/datasets/refresh` | Re-scan all server-side datasets in the background |
-| `POST` | `/datasets/<id>/delete` | Delete a server-side dataset and all of its files |
-| `POST` | `/datasets/<id>/rename` | Rename a server-side dataset |
-| `POST` | `/datasets/<id>/sources/delete` | Delete one source item from a dataset |
-| `GET` | `/api/datasets/status` | Report background dataset indexing status |
-| `GET` | `/viewer` | 3D mesh viewer (`?id=<result>` opens `results/<result>/mesh.*`) |
-| `GET` | `/meshes/<id>/mesh.<fmt>` | Mesh as `glb`, `stl`, `obj` or `ply` (`?download=1` saves the file) |
-| `POST` | `/process` | Load and preprocess a selected server source or uploaded JSON, TIFF, or DICOM data |
-| `POST` | `/viewer/build` | Build a mesh from an uploaded NIfTI mask and open it in the viewer |
-| `POST` | `/process/start` | Start server-side preprocessing in the background |
-| `GET` | `/process/<job_id>/status` | Get background preprocessing status |
-| `GET` | `/process/<job_id>/result` | Open the preview for a completed preprocessing job |
-| `GET` | `/datasets/<id>/sources/<source>/recommendations` | Calculate preprocessing suggestions for a validated source |
-
-Uploaded datasets are stored under `data/raw` and remain available after the
-application is restarted. At application startup, server-side datasets are
-indexed in a background thread. The web interface displays the loading status
-and refreshes the dataset list when indexing is complete. The preprocessing
-form then exposes only validated sources; archives and unverified files remain
-informational in the data-management panel.
-
-### Raw Data Preprocessing panel
-
-The **Raw Data Preprocessing** panel works with data placed directly on the
-server. It does not upload large raw volumes through the browser. Put data
-under `data/raw/<dataset_name>` and click **Refresh all data**. The application
-re-scans the directory in the background and reloads the panel only after the
-new catalog is ready.
-
-The supported layout is flat:
-
-```text
-data/raw/<dataset_name>/volume.nii
-data/raw/<dataset_name>/metadata.json
-data/raw/<dataset_name>/dicom_scan/slice_0001.dcm
-data/raw/<dataset_name>/tiff_scan/slice_0001.tif
-```
-
-`.json` and uncompressed `.nii` files must be directly in the dataset folder.
-A scan subfolder may contain only one-level DICOM (`.dcm`) or TIFF
-(`.tif`, `.tiff`) slice data. Nested folders, JSON/NIfTI files inside a scan
-folder, compressed raw files such as `.nii.gz` and `.json.gz`, and unsupported
-extensions are displayed but marked **invalid**. This makes problems visible
-without allowing an invalid source to be processed.
-
-Each detected dataset lists every direct file or folder as a source. A
-validated source can be processed with **Process data**. The settings modal
-contains:
-
-- **Target spacing (Z, Y, X)** — physical voxel size in millimetres after
-  resampling;
-- **HU range (min, max)** — lower and upper intensity limits applied during
-  preprocessing. For non-medical or non-calibrated data, these values should
-  be treated as an intensity range rather than assumed to be clinical HU;
-- **Invert HU values** — reverses the intensity direction when required;
-- **Enable denoising** — applies the configured noise-reduction step.
-
-When the modal opens, the application calculates initial suggestions from the
-selected source. It loads the source using the same loader that will be used
-for preprocessing, so the displayed input shape and spacing match the actual
-volume. `Target spacing` is copied from `Volume.spacing_mm` in `(Z, Y, X)`
-order. For the intensity range, only finite voxel values are considered; the
-minimum is rounded down with `floor` and the maximum is rounded up with
-`ceil`. Thus the suggestion includes all observed values and does not clip
-the source at the boundaries. For example, a source with spacing
-`[3.0, 3.0, 3.0]` and values from `1.0` to `1293.67` receives:
-
-```text
-Target spacing: 3,3,3
-HU range:       1,1294
-```
-
-These are starting suggestions, not mandatory settings. A smaller target
-spacing increases the voxel count through interpolation but does not create
-new physical detail. A narrower intensity range can improve contrast but
-clips values outside the selected limits. The modal therefore leaves both
-fields editable.
-
-Completed server-side preprocessing previews are stored under
-`results/preprocessed` and restored when the application starts, so they remain
-available after refreshing the page or restarting the application.
-The preview page loads only the selected 2D slice on demand instead of
-embedding the complete processed volume in the HTML response.
-Processing continues in a background thread while the user navigates through
-the application. Returning to the raw-data page restores the processing
-spinner and continues polling the same job.
-
-After `POST /process`, the **Processed volume** page displays the unified
-`Volume` metadata: source format, input/output shape, spacing, units, output
-value range, source SHA-256 hash, and the middle axial slice after
-preprocessing.
-
-Future route groups can be added for `/segmentation`, `/mesh`, `/metrics`, and
-`/export`.
-
-### 3D viewer
-
-`/viewer` shows meshes stored as `results/<experiment_id>/mesh.<format>` (the
-convention used by the experiment runner) in a WebGL viewer based on three.js,
-loaded from a CDN. Rotate with the mouse, zoom with the wheel, switch to
-wireframe, and download the mesh as `.glb`, `.stl`, `.obj` or `.ply`; formats
-that were not written to disk are converted on request.
-
-A mesh can also be built in the browser: upload a segmentation mask (`.nii` or
-`.nii.gz`), choose smoothing and decimation, and the result is stored as
-`results/mask_<timestamp>_<id>/mesh.glb`. The `results/` directory is not
-tracked by git. Its location can be changed with `results_dir` in
-`src/api/config.toml`.
-
-<img src="docs/images/3d_viewer.png" alt="3D viewer showing the swim bladder mesh built from the Gadus Morhua reference mask" width="640">
-
-### Running tests
-
-With the virtual environment activated, run:
+Raw scans are not in the repository (`data/raw/` is git-ignored); put them there
+yourself, as [docs/data.md](docs/data.md) describes.
 
 ```bash
 python -m pytest -q
 ```
+
+## The application
+
+| Page | What it is for |
+|---|---|
+| `/preprocess` | Load a scan from `data/raw`, resample it, set its intensity range, preview a slice |
+| `/segment` | Draw a box around the bladder, click a seed point, run a method |
+| `/experiments` | Every run in `results/`, as a table and a chart grouped by specimen |
+| `/viewer` | The reconstructed mesh, rotatable, downloadable as `.glb`, `.stl`, `.obj` or `.ply` |
+
+The routes, the preprocessing panel and the viewer are described in
+[docs/web-app.md](docs/web-app.md).
 
 ## Semi-automatic segmentation
 
@@ -179,6 +49,8 @@ back on the full grid, so mesh and metrics always work on the whole scan.
 | `chan_vese` | Improved Chan-Vese, 2D slice by slice |
 | `geodesic_active_contour` | Geodesic active contour (MorphGAC), 3D |
 | `growcut` | GrowCut cellular automaton, 3D |
+| `unet_2d` | 2D U-Net (resnet34), pretrained on lung lobes and fine-tuned on the three fish |
+| `sam_med3d` | SAM-Med3D foundation model, one click in a 3D box, no training |
 
 Each of the three analytical methods can start either from a small ball around
 the seed point (`init_from: seed_ball`, the default) or from the measured
@@ -194,8 +66,6 @@ to trust the result at all:
 | `growcut` | 0.585 | 0.851 | 0.597 | 0.586 |
 
 Dice against the reference mask, same box and same seed point for every method.
-On the Bluefin tuna every method returns an empty mask with `init_from: contrast`,
-because what its reference mask outlines is as dense as the tissue around it.
 See [docs/contrast.md](docs/contrast.md) for how the contrast is measured, what
 it changes for each method, and how to reproduce the table:
 
@@ -204,19 +74,13 @@ python scripts/measure_contrast.py
 python scripts/compare_methods.py
 ```
 
+### Results
+
 Every method also runs as an experiment, so a run of any of them lands in
-`results/` with its mask, its mesh and its metrics, and shows up in the
-Experiments tab next to the others:
-
-```bash
-python -m src.pipeline.runner configs/experiments/check_oreo_box.yaml
-python -m src.pipeline.runner configs/experiments/exp_analytical_oreo.yaml
-python -m src.pipeline.runner configs/experiments/exp_analytical_gac_oreo.yaml
-python -m src.pipeline.runner configs/experiments/exp_analytical_growcut_oreo.yaml
-```
-
-All four configs use the same box and the same seed point, so what they measure
-is the method and nothing else:
+`results/` with its mask, its mesh and its metrics, and shows up on the
+Experiments page next to the others. On the Oreo fish, where all four analytical
+configs use the same box and the same seed point, what the numbers measure is
+the method and nothing else:
 
 | Method | Dice | IoU | Volume | Run time |
 |---|---|---|---|---|
@@ -225,9 +89,17 @@ is the method and nothing else:
 | `growcut` | 0.819 | 0.693 | 21.6 mL | 0.02 s |
 | `geodesic_active_contour` | 0.757 | 0.609 | 19.7 mL | 0.04 s |
 
-(Oreo fish, reference volume 31.2 mL. These are the numbers the runner produces
-from the configs above; the table further up comes from `compare_methods.py`,
-which measures the methods on its own box.)
+(Oreo fish, reference volume 31.2 mL. These are the numbers the runner produces;
+the table further up comes from `compare_methods.py`, which measures the methods
+on its own box.)
+
+The Bluefin tuna is the hard case and the analytical methods stay under 0.3 on
+it. That is a property of the target rather than of the methods: what its
+reference mask outlines is only 6% gas by volume and 24% denser than 300 HU, so
+the largest connected gas region inside it reaches a Dice of 0.11 against the
+mask. Only the trained U-Net recovers the outline. See
+[docs/data.md](docs/data.md) for the measurement and for which of the tuna's two
+annotations to measure against.
 
 Each run also writes a `method_report.json` with the contrast the method
 measured, the parameters it used and anything it warned about, such as a region
@@ -237,16 +109,13 @@ that reached the wall of the volume.
 
 `sam_med3d` runs the SAM-Med3D foundation model (`sam_med3d_turbo.pth`, no
 training) on one click in a 3D box. The box must also be limited in z: the
-model's 128³ cube is centred on the box and scaled so that its longest side
-fills it. The rest of the cube shows the scan around the box, and the mask is
-kept inside the box. Its normalisation assumes HU, so on scans with almost
-nothing below 0 (mass density, Gadus) `intensity_shift: auto` moves 0 to where
-HU has it; HU scans are left as they are. A click-only variant, with the cube
-centred on the click, was tried and dropped because its Dice was too low.
+model's 128^3 cube is centred on the box and scaled so that its longest side
+fills it. Its normalisation assumes HU, so on scans with almost nothing below 0
+(mass density, Gadus) `intensity_shift: auto` moves 0 to where HU has it.
 
-Torch, the pinned upstream source and the weights are installed separately.
-The source and weights go to `sam-med3d-assets/` next to the repo, or wherever
-`--assets` or `SAM_MED3D_ASSETS` points (about 1 GB with torch):
+Torch, the pinned upstream source and the weights are installed separately, to
+`sam-med3d-assets/` next to the repository or wherever `--assets` or
+`SAM_MED3D_ASSETS` points (about 1 GB with torch):
 
 ```bash
 python scripts/install_sam_med3d.py
@@ -254,51 +123,11 @@ python -m src.pipeline.runner configs/experiments/sam_med3d_oreo.yaml
 python -m pytest -m slow    # the tests that need the real weights
 ```
 
-On `/segment`, load the scan with target spacing and HU range `none` and
-denoising off (so that the model sees it as in a config), draw the box, and set
-its first and last slice. The first run loads the weights and takes a while.
+Fine-tuning its decoder on our three fish did not help: trained on two fish and
+tested on the third it does worse than the published weights in 5 of 6 cases.
+See [docs/sam_med3d_finetuning.md](docs/sam_med3d_finetuning.md).
 
-An experiment fine-tuning the model's decoder on our three fish did not help.
-Trained on a fish, it segments that same fish well (Dice 0.83-0.97). Trained on
-two fish and tested on the third, it does worse than the published weights in
-5 of 6 cases. The tuned sets are kept apart from the published weights and
-named, and can be selected with `weights: <name>` (the default is `standard`).
-See [docs/sam_med3d_finetuning.md](docs/sam_med3d_finetuning.md) for what was
-tried, the results, and what data might change them.
-
-### Preparing a DICOM dump
-
-The Bluefin tuna scan arrives as a flat folder of files without an extension,
-with seven series mixed together. `load_volume(path, "dicom")` reads `*.dcm` from
-a folder and treats it as one volume, so the dump is split first:
-
-```bash
-python scripts/to_dicom_folders.py data/raw/DD2210_Blue_Tuna/DD2210 --dry-run
-python scripts/to_dicom_folders.py data/raw/DD2210_Blue_Tuna/DD2210
-```
-
-The files already are DICOM; they only get a name the loader recognises, and one
-folder per series. `--dry-run` prints what the dump holds:
-
-| folder | description | slices | size | thickness | z step |
-|---|---|---|---|---|---|
-| `02_CUERPO_CUERPO_7_0` | CUERPO CUERPO 7.0 | 263 | 512x512 | 7 mm | 3.5 mm |
-| `03_HUESO_HUESO_7_0` | HUESO HUESO 7.0 | 263 | 512x512 | 7 mm | 3.5 mm |
-| `04_CUERPO_CUERPO_2_0` | CUERPO CUERPO 2.0 | 918 | 512x512 | 2 mm | 1 mm |
-| `06_HUESO_HUESO_2_0` | HUESO HUESO 2.0 | 918 | 512x512 | 2 mm | 1 mm |
-
-(plus two scout/report series and one reformat). `CUERPO` is the body kernel and
-`HUESO` the bone kernel; the reference mask belongs to `02_CUERPO_CUERPO_7_0`,
-and `04_CUERPO_CUERPO_2_0` is the same body at 1 mm, covering the same z range
-from the same origin.
-
-Note that these slices overlap: 7 mm thick, reconstructed every 3.5 mm. The
-distance between slices is therefore taken from their positions
-(`ImagePositionPatient`) rather than from their thickness, and the loader warns
-when a series is not evenly spaced. A long series is also read slice by slice
-into the output array, so the 918-slice one loads in about 1 GB.
-
-### Running one experiment
+## Running one experiment
 
 `src/pipeline/runner.py` runs a single experiment from a `.yaml` config
 (`configs/experiments/`): load, preprocess, crop to the box, segment, then
@@ -324,53 +153,15 @@ Meshes built from the three reference masks in `data/reference_masks/`
 
 <img src="docs/images/reference_meshes.png" alt="Swim bladder meshes reconstructed from the reference masks" width="560">
 
+## Repository layout
 
-## 📁 Project Structure
-
-> **Note:** This is the planned target structure. Some components are not implemented yet.
-
-```text
-├── configs/
-│   ├── default_config.yaml           # base configuration
-│   └── experiments/                  # experiment-specific YAML configs e.g., exp_002_unet.yaml
-├── data/
-│   ├── raw/                          # input CT scans (.dcm, .tif/.tiff, .json)
-│   └── reference_masks/              # ground truth masks from 3D Slicer (.nii.gz)
-├── results/                          # generated experiment outputs
-├── src/
-│   ├── __init__.py
-│   ├── api/
-│   │   ├── app.py                    # Flask app factory and entry point
-│   │   ├── config.py                 # TOML configuration loading
-│   │   ├── config.toml               # application runtime settings
-│   │   ├── routes/
-│   │   │   └── web.py                # HTML routes
-│   │   ├── services/                 # application services
-│   │   ├── templates/
-│   │   │   ├── base.html             # shared page layout
-│   │   │   └── index.html            # application entry page
-│   │   └── static/
-│   │       ├── css/
-│   │       │   └── app.css            # application styles
-│   │       └── js/
-│   │           ├── app.js             # shared frontend behavior
-│   │           └── webgl-viewer.js    # WebGL viewer
-│   ├── core/                         # data loading & preprocessing
-│   │   ├── volume.py                 # unified Volume (dataclass) representation
-│   │   ├── loaders.py                # DICOM, TIFF & JSON loaders
-│   │   └── preprocessor.py           # normalization, resampling & denoising
-│   ├── models/                       # Segmentation models 
-│   │   ├── analytical.py             
-│   │   ├── unet.py                   
-│   │   └── foundation/               
-│   └── pipeline/                     # reconstruction, metrics & experiments
-│       ├── mesh.py                   # Marching Cubes + smoothing + decimation
-│       ├── metrics.py                # Dice, IoU, HD95, ASSD & VS
-│       └── runner.py                 # deterministic experiment runner
-├── tests/                            # unit & integration tests
-├── .gitignore
-├── requirements.txt
-├── LICENSE
-└── README.md
-```
----
+- `configs/` - `default_config.yaml` and one `.yaml` per experiment in `experiments/`
+- `data/raw/` - input CT scans, git-ignored; `data/reference_masks/` - ground truth from 3D Slicer
+- `results/` - what the runner writes, git-ignored
+- `src/core/` - `Volume`, the loaders (DICOM, TIFF, JSON, NIfTI) and the preprocessor
+- `src/models/` - the segmentation methods; `foundation/` holds SAM-Med3D
+- `src/pipeline/` - `runner.py`, `metrics.py`, `mesh.py`
+- `src/api/` - the Flask application, its templates and its static files
+- `scripts/` - installing SAM-Med3D, splitting a DICOM dump, measuring contrast
+- `docs/` - [web-app](docs/web-app.md), [data](docs/data.md),
+  [contrast](docs/contrast.md), [SAM-Med3D fine-tuning](docs/sam_med3d_finetuning.md)

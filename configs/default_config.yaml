@@ -20,7 +20,7 @@ preprocessing:
   denoise: true                   # Adaptive denoising
 
 algorithm:
-  name: "chan_vese"               # 'chan_vese', 'unet_2d', 'medsam', 'sam_med3d'
+  name: "chan_vese"               # 'chan_vese', 'geodesic_active_contour', 'growcut', 'box_region', 'unet_2d', 'sam_med3d'
   parameters:
     threshold_hu: -500
     max_iterations: 100

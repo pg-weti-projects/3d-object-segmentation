@@ -59,7 +59,7 @@ class PreprocessingSettings:
 
 @dataclass(frozen=True)
 class AlgorithmConfig:
-    name: str  # 'chan_vese' | 'unet_2d' | 'medsam' | 'sam_med3d' | 'protosam3d'
+    name: str  # 'box_region' | 'chan_vese' | 'geodesic_active_contour' | 'growcut' | 'unet_2d' | 'sam_med3d'
     parameters: dict = field(default_factory=dict)
 
 

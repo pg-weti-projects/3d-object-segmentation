@@ -36,9 +36,7 @@ ALGORITHMS: dict[str, str] = {
     "growcut": "src.models.analytical:growcut",
     "unet_2d": "src.models.unet:segment",
     "unet_25d": "src.models.unet:segment",
-    "medsam": "src.models.foundation.medsam:segment",
     "sam_med3d": "src.models.foundation.sam_med3d:segment",
-    "protosam3d": "src.models.foundation.protosam3d:segment",
 }
 _registered: dict[str, SegmentFunction] = {}
 

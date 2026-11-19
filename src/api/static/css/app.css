@@ -78,6 +78,11 @@ body {
   fill: var(--bs-body-color, #212529);
 }
 
+.metric-chart-group {
+  fill: var(--bs-body-color, #212529);
+  font-weight: 600;
+}
+
 .metric-chart-value {
   fill: var(--bs-secondary-color, #6c757d);
 }

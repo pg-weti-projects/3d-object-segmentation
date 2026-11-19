@@ -4,6 +4,28 @@ Where the scans go, what the dataset scanner accepts, and how the Bluefin tuna
 dump is prepared. Raw scans are not tracked by git: `data/raw/` is ignored, so
 every scan has to be put there by hand.
 
+## One name per specimen
+
+A specimen is one folder name, and that name is the same under `data/raw/` and
+under `data/reference_masks/`:
+
+```text
+data/raw/DD2210_Bluefin_Tuna/      data/reference_masks/DD2210_Bluefin_Tuna/
+data/raw/Gadus_Morhua/             data/reference_masks/Gadus_Morhua/
+data/raw/Oreo_fish/                data/reference_masks/Oreo_fish/
+```
+
+Nothing enforces this, so it is worth keeping by hand. The tuna used to be
+`DD2210_Blue_Tuna` among the scans and `DD2210_Bluefin_Tuna` among the masks,
+which left half the configs pointing at a folder that did not exist. Spelling
+counts too: `Gadus_morhua.nii.gz` is the file, and three configs asking for
+`Gadus_Morhua.nii.gz` ran on macOS, where the filesystem ignores case, and
+failed on Linux and in CI.
+
+`data/raw/` is not tracked by git, so renaming a folder here renames it only on
+your own machine. Everyone who already has the scans has to rename their copy
+to match, or their configs stop resolving.
+
 ## Layout the scanner accepts
 
 The supported layout is flat:
@@ -42,8 +64,8 @@ series mixed together. `load_volume(path, "dicom")` reads `*.dcm` from a folder
 and treats it as one volume, so the dump is split first:
 
 ```bash
-python scripts/to_dicom_folders.py data/raw/DD2210_Blue_Tuna/DD2210 --dry-run
-python scripts/to_dicom_folders.py data/raw/DD2210_Blue_Tuna/DD2210
+python scripts/to_dicom_folders.py data/raw/DD2210_Bluefin_Tuna/DD2210 --dry-run
+python scripts/to_dicom_folders.py data/raw/DD2210_Bluefin_Tuna/DD2210
 ```
 
 The files already are DICOM; they only get a name the loader recognises, and one

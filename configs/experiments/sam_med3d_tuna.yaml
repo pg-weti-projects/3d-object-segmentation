@@ -6,7 +6,7 @@ experiment:
 data:
   # needs the DICOM loader to keep the slice order along the slice normal: until then this series loads
   # mirrored in z against the mask, and the box, seed and metrics are wrong
-  input_path: "data/raw/DD2210_Blue_Tuna/DD2210_dicom/02_CUERPO_CUERPO_7_0"
+  input_path: "data/raw/DD2210_Bluefin_Tuna/DD2210_dicom/02_CUERPO_CUERPO_7_0"
   reference_mask_path: "data/reference_masks/DD2210_Bluefin_Tuna/Series_3_segmentation.nii.gz"
   format: "dicom"
   # box around the bladder, limited in z as well (mm from the first voxel, [z, y, x]), and a voxel inside it

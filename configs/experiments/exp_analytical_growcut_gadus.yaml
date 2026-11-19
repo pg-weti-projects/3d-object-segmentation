@@ -5,7 +5,7 @@ experiment:
   repetitions: 1
 
 data:
-  input_path: "data/raw/Gadus_Morhua/Gadus_Morhua.nii.gz"
+  input_path: "data/raw/Gadus_Morhua/Gadus_morhua.nii.gz"
   reference_mask_path: "data/reference_masks/Gadus_Morhua/Segmentation.nii.gz"
   format: "nifti"
   box:

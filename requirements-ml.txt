@@ -1,6 +1,11 @@
 # The deep-learning methods, kept apart from requirements.txt: torch is large
-# and only unet_2d and the SAM-Med3D fine-tuning need it. Without these two
-# packages their tests skip themselves, so the suite still runs on a machine
-# without them. CI installs the CPU wheels - see .github/workflows/tests.yml.
+# and only unet_2d and the SAM-Med3D fine-tuning need it. Without these packages
+# their tests skip themselves, so the suite still runs on a machine without them.
+#
+# Install all three in one command. torchvision ships compiled operators that are
+# built against one exact torch build, so a torch and a torchvision taken from
+# different indexes abort the import with "operator torchvision::nms does not
+# exist". Resolving them together keeps the builds matched.
 torch>=2.0
+torchvision>=0.15
 segmentation_models_pytorch>=0.3

@@ -2,7 +2,7 @@
 scripts/to_dicom_folders.py
 
 Turns a flat DICOM dump (files without an extension, several series mixed
-together, as in ``data/raw/DD2210_Blue_Tuna/DD2210``) into one folder per series
+together, as in ``data/raw/DD2210_Bluefin_Tuna/DD2210``) into one folder per series
 with ``.dcm`` files, which is what ``load_volume(path, "dicom")`` expects: it
 reads ``*.dcm`` from a single folder and orders the slices by their position.
 
@@ -11,7 +11,7 @@ Nothing is converted in the sense of re-encoding - the files already are DICOM
 are split by series so that one folder is one volume.
 
 Usage:
-    python scripts/to_dicom_folders.py data/raw/DD2210_Blue_Tuna/DD2210
+    python scripts/to_dicom_folders.py data/raw/DD2210_Bluefin_Tuna/DD2210
     python scripts/to_dicom_folders.py <source> --out <folder> --mode link
     python scripts/to_dicom_folders.py <source> --dry-run
 

@@ -2,7 +2,7 @@ experiment:
   id: "exp_growcut_tuna"
   description: "GrowCut on DD2210 Bluefin tuna (series 3), inside the box, started from a ball around the seed"
   seed: 42
-  repetitions: 1
+  repetitions: 2
 
 data:
   input_path: "data/raw/DD2210_Bluefin_Tuna/DD2210_Bluefin_Tuna_series3.nii.gz"

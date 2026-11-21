@@ -1,0 +1,30 @@
+experiment:
+  id: "exp_box_region_gadus"
+  description: "box_region on Gadus morhua"
+  seed: 42
+  repetitions: 2
+
+data:
+  input_path: "data/raw/Gadus_Morhua/Gadus_morhua.nii.gz"
+  reference_mask_path: "data/reference_masks/Gadus_Morhua/Segmentation.nii.gz"
+  format: "nifti"
+  # the box of sam_med3d_gadus.yaml, which is the annotation plus about 15%.
+  # The point is the deepest voxel of the reference mask, 3.6 mm from its boundary;
+  # it is given on this scan's 0.2065 mm grid, not the 0.413 mm one the other configs use.
+  box:
+    min_mm: [64.85, 27.26, 45.85]
+    max_mm: [135.28, 47.09, 60.93]
+  seed_zyx: [443, 193, 263]
+
+algorithm:
+  name: "box_region"
+  parameters:
+    {}
+
+mesh:
+  smoothing_iterations: 5
+  decimation_factor: 0.2
+  output_format: "glb"
+
+output:
+  results_dir: "results/"

@@ -63,6 +63,23 @@ def _dataset_of(config: dict[str, Any]) -> str:
     return parts[-1] if parts else "-"
 
 
+def _specimen_of(config: dict[str, Any]) -> str:
+    """The specimen a run is about, named after the reference mask it is scored
+    against rather than after the scan.
+
+    One fish reaches the runner under several file names - a DICOM folder, a
+    NIfTI export of that folder, a resampled copy - which spreads a single
+    specimen over several labels and makes its methods impossible to compare at
+    a glance. The masks keep one folder per fish, so that folder is the name.
+    """
+    reference = str(_section(config, "data").get("reference_mask_path", "") or "")
+    if reference:
+        folder = Path(reference).parent.name
+        if folder and folder not in ("reference_masks", "data"):
+            return folder
+    return _dataset_of(config)
+
+
 def read_experiment(directory: Path) -> dict[str, Any]:
     """One run, as the page needs it."""
     config = _read_yaml(directory / "config.yaml")
@@ -73,7 +90,7 @@ def read_experiment(directory: Path) -> dict[str, Any]:
     )
     return {
         "id": directory.name,
-        "dataset": _dataset_of(config),
+        "dataset": _specimen_of(config),
         "algorithm": str(_section(config, "algorithm").get("name", "") or "-"),
         "repetitions": _section(config, "experiment").get("repetitions"),
         "metrics": {key: metrics.get(key) for key in _KIND},
@@ -129,7 +146,7 @@ def comparison(runs: list[dict[str, Any]], metric: str) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: row["value"], reverse=bool(_BETTER.get(metric, True)))
 
 
-MAX_LABEL = 38
+MAX_LABEL = 30
 
 
 def _shorten(text: str, limit: int = MAX_LABEL) -> str:
@@ -138,32 +155,48 @@ def _shorten(text: str, limit: int = MAX_LABEL) -> str:
 
 def bar_chart(rows: list[dict[str, Any]], metric: str, width: int = 860, bar: int = 26) -> str:
     """A horizontal bar chart as inline SVG - built here so the page needs no
-    chart library and still draws with scripts blocked."""
+    chart library and still draws with scripts blocked.
+
+    The bars are grouped by specimen, so that what sits next to each other is
+    what was run on the same fish. Every bar is measured against the same scale,
+    so the groups stay comparable with one another.
+    """
     if not rows:
         return ""
     kind = _KIND.get(metric, "ratio")
-    label_width, right = 320, 110
+    label_width, right, indent, heading = 250, 110, 14, 26
     span = max(width - label_width - right, 10)
     highest = max(row["value"] for row in rows)
     scale = 1.0 if (kind == "ratio" and highest <= 1.0) else (highest or 1.0)
-    height = len(rows) * (bar + 10) + 16
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:  # rows arrive best first, so the groups do too
+        groups.setdefault(row["dataset"], []).append(row)
+    height = len(rows) * (bar + 10) + len(groups) * heading + 16
 
     parts = [
         f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" role="img" '
-        f'aria-label="{_escape(_LABEL.get(metric, metric))} per run" class="metric-chart">'
+        f'aria-label="{_escape(_LABEL.get(metric, metric))} per run, grouped by specimen" '
+        f'class="metric-chart">'
     ]
-    for index, row in enumerate(rows):
-        top = index * (bar + 10) + 8
-        baseline = top + bar * 0.7
-        length = max(2, round(span * (row["value"] / scale))) if scale else 2
-        name = _shorten(f'{row["dataset"]} / {row["algorithm"]}')
+    top = 8
+    for specimen, members in groups.items():
         parts.append(
-            f'<text x="0" y="{baseline:.0f}" class="metric-chart-label">{_escape(name)}</text>'
-            f'<rect x="{label_width}" y="{top}" width="{length}" height="{bar}" rx="3" '
-            f'class="metric-chart-bar"></rect>'
-            f'<text x="{label_width + length + 8}" y="{baseline:.0f}" class="metric-chart-value">'
-            f'{_escape(format_value(row["value"], kind))}</text>'
+            f'<text x="0" y="{top + 15}" class="metric-chart-group">{_escape(specimen)}</text>'
         )
+        top += heading
+        for row in members:
+            baseline = top + bar * 0.7
+            length = max(2, round(span * (row["value"] / scale))) if scale else 2
+            parts.append(
+                f'<text x="{indent}" y="{baseline:.0f}" class="metric-chart-label">'
+                f'{_escape(_shorten(row["algorithm"]))}</text>'
+                f'<rect x="{label_width}" y="{top}" width="{length}" height="{bar}" rx="3" '
+                f'class="metric-chart-bar"></rect>'
+                f'<text x="{label_width + length + 8}" y="{baseline:.0f}" class="metric-chart-value">'
+                f'{_escape(format_value(row["value"], kind))}</text>'
+            )
+            top += bar + 10
     parts.append("</svg>")
     return "".join(parts)
 

@@ -763,7 +763,7 @@
    }
   },
   "tuna": {
-   "input_path": "data/raw/DD2210_Blue_Tuna/02_CUERPO_CUERPO_7_0",
+   "input_path": "data/raw/DD2210_Bluefin_Tuna/02_CUERPO_CUERPO_7_0",
    "format": "dicom",
    "reference_mask_path": "data/reference_masks/DD2210_Bluefin_Tuna/Series_3_segmentation.nii.gz",
    "extra_references": {
